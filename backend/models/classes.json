@@ -1,0 +1,49 @@
+{
+  "classes": [
+    "no_defect",
+    "surface_scratch",
+    "dent_deformation",
+    "incorrect_assembly",
+    "surface_contamination",
+    "thread_damage",
+    "missing_component",
+    "insulation_or_wire_damage"
+  ],
+  "class_to_idx": {
+    "no_defect": 0,
+    "surface_scratch": 1,
+    "dent_deformation": 2,
+    "incorrect_assembly": 3,
+    "surface_contamination": 4,
+    "thread_damage": 5,
+    "missing_component": 6,
+    "insulation_or_wire_damage": 7
+  },
+  "idx_to_class": {
+    "0": "no_defect",
+    "1": "surface_scratch",
+    "2": "dent_deformation",
+    "3": "incorrect_assembly",
+    "4": "surface_contamination",
+    "5": "thread_damage",
+    "6": "missing_component",
+    "7": "insulation_or_wire_damage"
+  },
+  "model_architecture": "MobileNetV3-Small Transfer Learning",
+  "input_resolution": [
+    224,
+    224
+  ],
+  "normalization": {
+    "mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "std": [
+      0.229,
+      0.224,
+      0.225
+    ]
+  }
+}

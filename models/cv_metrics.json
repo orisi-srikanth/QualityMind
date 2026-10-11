@@ -1,0 +1,208 @@
+{
+  "dataset": "MVTec AD (4 approved categories: metal_nut, screw, transistor, cable)",
+  "evaluation_timestamp": "2026-10-10T23:42:22Z",
+  "stage_a_anomaly_detection": {
+    "overall_image_auroc": 0.8585,
+    "overall_pixel_auroc": 0.9302,
+    "overall_localisation_iou": 0.2484,
+    "overall_localisation_dice": 0.3316,
+    "overall_pct_boxes_iou_gte_05": 33.33,
+    "mAP_at_05": 0.3333,
+    "per_category": {
+      "metal_nut": {
+        "image_auroc": 0.9545,
+        "precision": 1.0,
+        "recall": 0.8667,
+        "f1_score": 0.9286,
+        "pixel_auroc": 0.9483,
+        "localisation_iou": 0.3923,
+        "localisation_dice": 0.5234,
+        "pct_boxes_iou_gte_05": 53.33
+      },
+      "screw": {
+        "image_auroc": 0.472,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1_score": 0.0,
+        "pixel_auroc": 0.8919,
+        "localisation_iou": 0.0,
+        "localisation_dice": 0.0,
+        "pct_boxes_iou_gte_05": 0.0
+      },
+      "transistor": {
+        "image_auroc": 0.9792,
+        "precision": 1.0,
+        "recall": 0.75,
+        "f1_score": 0.8571,
+        "pixel_auroc": 0.9077,
+        "localisation_iou": 0.3304,
+        "localisation_dice": 0.4518,
+        "pct_boxes_iou_gte_05": 75.0
+      },
+      "cable": {
+        "image_auroc": 0.9914,
+        "precision": 0.9091,
+        "recall": 0.8333,
+        "f1_score": 0.8696,
+        "pixel_auroc": 0.9692,
+        "localisation_iou": 0.3931,
+        "localisation_dice": 0.5215,
+        "pct_boxes_iou_gte_05": 41.67
+      }
+    }
+  },
+  "stage_b_defect_classification": {
+    "overall_accuracy": 0.8384,
+    "macro_f1": 0.7098,
+    "per_class": {
+      "no_defect": {
+        "precision": 0.9632,
+        "recall": 0.8674,
+        "f1_score": 0.9128,
+        "support": 181
+      },
+      "surface_scratch": {
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1_score": 0.6667,
+        "support": 10
+      },
+      "dent_deformation": {
+        "precision": 1.0,
+        "recall": 0.2857,
+        "f1_score": 0.4444,
+        "support": 7
+      },
+      "incorrect_assembly": {
+        "precision": 1.0,
+        "recall": 0.8571,
+        "f1_score": 0.9231,
+        "support": 7
+      },
+      "surface_contamination": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "support": 4
+      },
+      "thread_damage": {
+        "precision": 0.6154,
+        "recall": 1.0,
+        "f1_score": 0.7619,
+        "support": 8
+      },
+      "missing_component": {
+        "precision": 0.1786,
+        "recall": 1.0,
+        "f1_score": 0.303,
+        "support": 5
+      },
+      "insulation_or_wire_damage": {
+        "precision": 0.625,
+        "recall": 0.7143,
+        "f1_score": 0.6667,
+        "support": 7
+      }
+    },
+    "five_fold_cv_macro_f1": {
+      "mean": 0.7977,
+      "std": 0.0351,
+      "fold_scores": [
+        0.8223,
+        0.7724,
+        0.851,
+        0.7529,
+        0.7901
+      ]
+    },
+    "confusion_matrix": [
+      [
+        157,
+        0,
+        0,
+        0,
+        0,
+        0,
+        21,
+        3
+      ],
+      [
+        2,
+        5,
+        0,
+        0,
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        3,
+        0,
+        2,
+        0,
+        0,
+        2,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        6,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        8,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        0
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        5
+      ]
+    ]
+  },
+  "limitations": [
+    "MVTec AD consists of proxy parts (nuts, screws, transistors, cables) and does NOT contain precision machined shafts.",
+    "Lighting and camera perspective are highly controlled under laboratory conditions.",
+    "Small defect sample size: classes such as transistor defects have only ~10 images per class.",
+    "Cracks are NOT present in the 4 selected MVTec AD categories and are explicitly unsupported.",
+    "Academic prototype implementation; not intended for uncalibrated direct production deployment."
+  ]
+}

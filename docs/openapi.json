@@ -1,0 +1,2256 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "QualityMind API",
+    "description": "\n## QualityMind: Agentic Manufacturing Quality Decision-Support Platform\n\nQualityMind is an enterprise industrial quality intelligence system engineered for high-precision CNC manufacturing cells. It orchestrates eight specialized AI agents with deterministic statistical process control, boundary-safe tolerance verification, computer vision defect localization, 8-parameter process anomaly detection, and human-in-the-loop engineering disposition.\n\n### Mandatory Epistemic Labeling & Audit Governance\nEvery finding, chart, and recommendation is strictly partitioned into one of five epistemic labels:\n- **`[OBSERVED FACT]`**: Verified direct measurements from calibrated sensors and gauges.\n- **`[MODEL PREDICTION]`**: Inferences from computer vision and machine learning models.\n- **`[STATISTICAL FINDING]`**: 3-sigma control limits, Nelson rule trips, and capability indices.\n- **`[HYPOTHESIS]`**: Causal theories generated during Root Cause Analysis (RCA) requiring physical verification.\n- **`[CONFIRMED ROOT CAUSE]`**: Final causal classification elevated exclusively by authenticated Quality Engineers.\n\n### Human-in-the-Loop Decision Support\nIn compliance with IATF 16949 and ISO 9001, QualityMind functions exclusively as decision-support. It never autonomously releases batches, scraps parts, adjusts machine offsets, or stops production lines.\n\n### Demo Personas & Credentials\nClick the **Authorize** button at the top right to authenticate using Bearer JWT tokens.\n- **Admin**: `admin@precisionaero.com` / `Admin123!` (Full platform administration & configuration)\n- **Quality Engineer**: `engineer@precisionaero.com` / `Engineer123!` (Authorized to confirm root causes, sign off batches, approve CAPAs)\n- **Operator**: `operator@precisionaero.com` / `Operator123!` (Inspection intake, telemetry monitoring; read-only on approvals)\n\n**How to Authorize from Swagger:**\n1. Call `POST /api/auth/login` with your username and password.\n2. Copy the returned `access_token` string.\n3. Click the green **Authorize** button at the top right of this page, paste the token, and click **Authorize**.\n",
+    "contact": {
+      "name": "Quality Engineering Team",
+      "email": "quality@precisionaero.com"
+    },
+    "license": {
+      "name": "Proprietary / Precision Aerospace Manufacturing",
+      "url": "https://precisionaero.com/license"
+    },
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Authenticate user persona",
+        "description": "Generates JWT bearer token for demo personas: admin@precisionaero.com, engineer@precisionaero.com, operator@precisionaero.com.",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get current user profile",
+        "description": "Returns authenticated profile including root cause confirmation authorization flag.",
+        "operationId": "get_me_api_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products": {
+      "get": {
+        "tags": [
+          "Products & Machines"
+        ],
+        "summary": "List registered product specifications",
+        "description": "Retrieves catalog of manufactured products, nominal dimensions, tolerances, and inspection parameters.",
+        "operationId": "get_products_api_products_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products/{product_id}/characteristics": {
+      "get": {
+        "tags": [
+          "Products & Machines"
+        ],
+        "summary": "Get product inspection characteristics and tolerance limits",
+        "description": "Retrieves dimensional tolerances, nominal values, and engineering limits for specified product ID.",
+        "operationId": "get_product_characteristics_api_products__product_id__characteristics_get",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/machines": {
+      "get": {
+        "tags": [
+          "Products & Machines"
+        ],
+        "summary": "List factory floor CNC machine cells",
+        "description": "Retrieves registered CNC machining cells, assigned lines, and active health indicators.",
+        "operationId": "get_machines_api_machines_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/batches": {
+      "get": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "List production manufacturing batches",
+        "description": "Retrieves active and historical batches with shift, quantity, material lot, and quality hold disposition.",
+        "operationId": "get_batches_api_batches_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Batches"
+        ],
+        "summary": "Register new manufacturing batch",
+        "description": "Ingests new batch record with material lot and process parameters.",
+        "operationId": "create_batch_api_batches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBatchPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/inspection/evaluate": {
+      "post": {
+        "tags": [
+          "Inspection"
+        ],
+        "summary": "Evaluate dimensional tolerance compliance",
+        "description": "100% deterministic evaluation of sample measurements against engineering limits (USL/LSL). Returns conformance status, nominal deviations, and limit deviations.",
+        "operationId": "evaluate_measurements_api_inspection_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualInspectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/inspection/upload-csv": {
+      "post": {
+        "tags": [
+          "Inspection"
+        ],
+        "summary": "Intake and normalize CMM measurement CSV",
+        "description": "Multi-format CSV/Excel intake with automatic unit normalization (microns/inches to mm) and schema validation.",
+        "operationId": "upload_csv_inspection_api_inspection_upload_csv_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_csv_inspection_api_inspection_upload_csv_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/inspection/{batch_id}/spec-check": {
+      "get": {
+        "tags": [
+          "Inspection"
+        ],
+        "summary": "Evaluate batch dimensional conformance and distribution",
+        "description": "Return total inspected, accepted count, nonconforming count, rejection %, and histogram data bins.",
+        "operationId": "get_batch_spec_check_api_inspection__batch_id__spec_check_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vision/inspect-sample": {
+      "post": {
+        "tags": [
+          "Vision"
+        ],
+        "summary": "Inspect sample surface defect image",
+        "description": "Inspect test images (e.g. metal_nut_scratch.png) using two-stage real MVTec PatchCore + MobileNetV3. Returns defect type, confidence, and bounding box.",
+        "operationId": "inspect_sample_image_api_vision_inspect_sample_post",
+        "parameters": [
+          {
+            "name": "sample_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "metal_nut_scratch.png",
+              "title": "Sample Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vision/upload": {
+      "post": {
+        "tags": [
+          "Vision"
+        ],
+        "summary": "Upload and inspect high-resolution part image",
+        "description": "Multipart upload of part image for real-time defect classification and bounding box localization.",
+        "operationId": "upload_and_inspect_image_api_vision_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_and_inspect_image_api_vision_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/vision/findings": {
+      "get": {
+        "tags": [
+          "Vision"
+        ],
+        "summary": "List visual inspection records and review states",
+        "description": "List all visual inspection findings with model_version and human review status.",
+        "operationId": "get_vision_findings_api_vision_findings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/process/telemetry": {
+      "get": {
+        "tags": [
+          "Process Monitoring"
+        ],
+        "summary": "Retrieve CNC machine telemetry series",
+        "description": "Retrieve sensor time series for CNC-04: spindle speed (1200 RPM), feed rate (0.20 mm/rev), vibration (3.8 mm/s), and tool cycles (1150).",
+        "operationId": "get_telemetry_api_process_telemetry_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "machine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CNC-04",
+              "title": "Machine"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/process/anomalies": {
+      "get": {
+        "tags": [
+          "Process Monitoring"
+        ],
+        "summary": "List detected machine telemetry anomalies",
+        "description": "List flagged statistical anomalies (Isolation Forest outliers, CUSUM drift, threshold trips).",
+        "operationId": "get_process_anomalies_api_process_anomalies_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "machine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CNC-04",
+              "title": "Machine"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spc/analyze": {
+      "get": {
+        "tags": [
+          "SPC & Capability"
+        ],
+        "summary": "Run Statistical Process Control analysis and Nelson rules",
+        "description": "Generates auto-selected control chart (I-MR), center line, UCL, LCL, Nelson rule violations, and capability metrics.",
+        "operationId": "analyze_spc_api_spc_analyze_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/spc/capability": {
+      "get": {
+        "tags": [
+          "SPC & Capability"
+        ],
+        "summary": "Calculate process capability metrics with guardrails",
+        "description": "Calculate process capability indices (Cp, Cpk, Pp, Ppk) with sample size adequacy checks (insufficient-data warning for n < 30).",
+        "operationId": "get_spc_capability_api_spc_capability_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/incidents": {
+      "get": {
+        "tags": [
+          "Incidents"
+        ],
+        "summary": "List Quality Incidents and Non-Conformance Reports (NCR)",
+        "description": "List all active and closed Quality Non-Conformance Reports with assigned severity and status.",
+        "operationId": "get_incidents_api_incidents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rca/analyze": {
+      "get": {
+        "tags": [
+          "Root Cause Analysis"
+        ],
+        "summary": "Execute 5-Whys and 6M Ishikawa Root Cause Analysis",
+        "description": "Execute 6M Ishikawa fishbone analysis, 5-Whys causal chains, and evidence weighting across candidate root causes.",
+        "operationId": "get_rca_api_rca_analyze_get",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "INC-2026-088",
+              "title": "Incident Id"
+            }
+          },
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rca/rag-search": {
+      "get": {
+        "tags": [
+          "Root Cause Analysis"
+        ],
+        "summary": "Vector semantic search across historical NCR archives",
+        "description": "Search historical quality incidents and SOP archives in ChromaDB. Query 'oversized shaft diameter' returns historical match NCR-019.",
+        "operationId": "search_historical_incidents_api_rca_rag_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "Oversized shaft diameter tool wear",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "top_k",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 4,
+              "title": "Top K"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pareto": {
+      "get": {
+        "tags": [
+          "Pareto"
+        ],
+        "summary": "Defect Pareto distribution and Vital Few analysis",
+        "description": "IATF 16949 Vital Few analysis calculating cumulative frequencies, Pareto classifications, and recommendation actions.",
+        "operationId": "get_pareto_api_pareto_get",
+        "parameters": [
+          {
+            "name": "dimension",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "defect_type",
+              "title": "Dimension"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Date"
+            }
+          },
+          {
+            "name": "to_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/capa/plan": {
+      "get": {
+        "tags": [
+          "CAPA"
+        ],
+        "summary": "Generate 3-tiered CAPA action plan",
+        "description": "Generate 3-tiered CAPA recommendations: Immediate Containment (quarantine), Corrective Action (tool replacement), and Preventive Action (SPC gate).",
+        "operationId": "get_capa_api_capa_plan_get",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "INC-2026-088",
+              "title": "Incident Id"
+            }
+          },
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orchestrator/run": {
+      "post": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Execute full 8-agent manufacturing quality pipeline",
+        "description": "Runs end-to-end multi-agent orchestration for specified batch. Pauses execution at human approval gate.",
+        "operationId": "run_orchestrated_pipeline_api_orchestrator_run_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orchestrator/langgraph-run": {
+      "post": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Execute pipeline via compiled LangGraph StateGraph",
+        "description": "Explicitly executes multi-agent pipeline using compiled LangGraph StateGraph with checkpointing.",
+        "operationId": "run_langgraph_pipeline_endpoint_api_orchestrator_langgraph_run_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflows": {
+      "post": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Initialize new quality inspection workflow",
+        "description": "Initializes workflow for batch and returns initial checkpointed state.",
+        "operationId": "start_workflow_api_workflows_post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflows/{workflow_id}": {
+      "get": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Retrieve workflow execution state",
+        "description": "Retrieves state, agent outputs, and pause gate status for specified workflow.",
+        "operationId": "get_workflow_state_api_workflows__workflow_id__get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflows/{workflow_id}/trace": {
+      "get": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Retrieve multi-agent execution trace",
+        "description": "Returns detailed agent execution step logs, timestamps, and input/output summaries.",
+        "operationId": "get_workflow_trace_api_workflows__workflow_id__trace_get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflows/{workflow_id}/decision": {
+      "post": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Submit human engineering disposition (HITL Gate)",
+        "description": "Authorized quality engineer confirms or rejects findings, records comments, and resumes workflow. Requires quality_engineer or admin role (operator receives HTTP 403).",
+        "operationId": "submit_workflow_decision_api_workflows__workflow_id__decision_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HumanApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review/sign-off": {
+      "post": {
+        "tags": [
+          "Workflows (Agents)"
+        ],
+        "summary": "Submit authorized engineering disposition and root cause elevation",
+        "description": "Human-in-the-Loop decision gate. Authenticated Quality Engineer assigns final batch disposition and elevates confirmed root cause. Requires quality_engineer or admin role (operator receives HTTP 403).",
+        "operationId": "submit_human_decision_api_review_sign_off_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HumanApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/effectiveness/{capa_id}": {
+      "get": {
+        "tags": [
+          "Effectiveness"
+        ],
+        "summary": "Verify CAPA intervention efficacy via two-proportion z-test",
+        "description": "Two-proportion z-test evaluation comparing pre- and post-intervention rejection rates with statistical p-value and association disclaimer.",
+        "operationId": "get_capa_effectiveness_api_effectiveness__capa_id__get",
+        "parameters": [
+          {
+            "name": "capa_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Capa Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/dashboard/summary": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Retrieve executive quality dashboard KPIs",
+        "description": "Executive KPIs: acceptance rate, rejection rate, active incidents, open CAPAs, machine status, Pareto distribution, and SPC state.",
+        "operationId": "get_dashboard_summary_api_dashboard_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reports/pdf": {
+      "get": {
+        "tags": [
+          "Reports"
+        ],
+        "summary": "Download ISO 9001 / IATF 16949 audit dossier PDF report",
+        "description": "Generates and streams comprehensive 12-section ISO 9001 / IATF 16949 compliant Audit Report PDF with embedded charts and epistemic labels.",
+        "operationId": "download_pdf_report_api_reports_pdf_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "BATCH-0245",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Retrieve system version and model metadata",
+        "description": "Returns platform version, computer vision model version, and governance guarantees.",
+        "operationId": "get_system_version_api_version_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scenarios/all": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Execute all 8 evaluation test scenarios (TC-01..TC-08)",
+        "description": "Executes the complete evaluation suite across conforming batches, tolerance trips, defect images, vibration anomalies, Nelson drift, vector RAG, and CAPA effectiveness.",
+        "operationId": "get_all_scenarios_api_scenarios_all_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scenarios/{scenario_id}": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Execute individual evaluation scenario",
+        "description": "Executes single scenario (e.g. TC-01 to TC-08) and returns structured verification report.",
+        "operationId": "get_single_scenario_api_scenarios__scenario_id__get",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scenario Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent3/knowledge/status": {
+      "get": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Get Knowledge Status",
+        "description": "Returns operational information about the ChromaDB knowledge collection and LLM state.",
+        "operationId": "get_knowledge_status_agent3_knowledge_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent3/knowledge/ingest": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Ingest Knowledge Documents",
+        "description": "Ingests manufacturing CSVs, JSONs, Markdown SOPs, TXTs, and digital PDFs into persistent ChromaDB.\nPreserves complete CSV rows as single cohesive records.",
+        "operationId": "ingest_knowledge_documents_agent3_knowledge_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/KnowledgeIngestRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeIngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent3/knowledge/query": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Query Knowledge Base",
+        "description": "Performs semantic retrieval against the knowledge collection.\nSupports metadata filters (category, record_id, machine_id, part_number).\nIn offline mode (LLM_PROVIDER='none'), returns deterministic evidence summaries without external API calls.",
+        "operationId": "query_knowledge_base_agent3_knowledge_query_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeQueryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "System Health & Readiness Check",
+        "description": "Returns operational health status, active agents count, and governance mode.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_upload_and_inspect_image_api_vision_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_and_inspect_image_api_vision_upload_post"
+      },
+      "Body_upload_csv_inspection_api_inspection_upload_csv_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_csv_inspection_api_inspection_upload_csv_post"
+      },
+      "CreateBatchPayload": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id",
+            "default": "BATCH-0245",
+            "example": "BATCH-0245"
+          },
+          "product_id": {
+            "type": "string",
+            "title": "Product Id",
+            "default": "PROD-PS-101",
+            "example": "PROD-PS-101"
+          },
+          "part_number": {
+            "type": "string",
+            "title": "Part Number",
+            "default": "PS-2026-101",
+            "example": "PS-2026-101"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine",
+            "default": "CNC-04",
+            "example": "CNC-04"
+          },
+          "material": {
+            "type": "string",
+            "title": "Material",
+            "default": "Carbon Steel (AISI 1045)",
+            "example": "Carbon Steel (AISI 1045)"
+          },
+          "material_lot": {
+            "type": "string",
+            "title": "Material Lot",
+            "default": "LOT-CS-9842",
+            "example": "LOT-CS-9842"
+          },
+          "shift": {
+            "type": "string",
+            "title": "Shift",
+            "default": "Night Shift",
+            "example": "Night Shift"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity",
+            "default": 500,
+            "example": 500
+          }
+        },
+        "type": "object",
+        "title": "CreateBatchPayload"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HumanApprovalRequest": {
+        "properties": {
+          "approved_by": {
+            "type": "string",
+            "title": "Approved By"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "engineering_comments": {
+            "type": "string",
+            "title": "Engineering Comments"
+          },
+          "confirmed_root_cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Root Cause"
+          },
+          "approved_capa_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Approved Capa Ids",
+            "default": []
+          },
+          "disposition": {
+            "type": "string",
+            "title": "Disposition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "approved_by",
+          "decision",
+          "engineering_comments",
+          "disposition"
+        ],
+        "title": "HumanApprovalRequest"
+      },
+      "KnowledgeIngestRequest": {
+        "properties": {
+          "source_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Paths"
+          },
+          "force_reindex": {
+            "type": "boolean",
+            "title": "Force Reindex",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "KnowledgeIngestRequest"
+      },
+      "KnowledgeIngestResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "files_discovered": {
+            "type": "integer",
+            "title": "Files Discovered"
+          },
+          "files_processed": {
+            "type": "integer",
+            "title": "Files Processed"
+          },
+          "files_updated": {
+            "type": "integer",
+            "title": "Files Updated"
+          },
+          "files_skipped": {
+            "type": "integer",
+            "title": "Files Skipped"
+          },
+          "chunks_added": {
+            "type": "integer",
+            "title": "Chunks Added"
+          },
+          "chunks_updated": {
+            "type": "integer",
+            "title": "Chunks Updated"
+          },
+          "chunks_deleted": {
+            "type": "integer",
+            "title": "Chunks Deleted"
+          },
+          "per_file_status": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Per File Status",
+            "default": {}
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "files_discovered",
+          "files_processed",
+          "files_updated",
+          "files_skipped",
+          "chunks_added",
+          "chunks_updated",
+          "chunks_deleted"
+        ],
+        "title": "KnowledgeIngestResponse"
+      },
+      "KnowledgeMatchItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "source_file": {
+            "type": "string",
+            "title": "Source File"
+          },
+          "record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Id"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "default": {}
+          },
+          "chunk_index": {
+            "type": "integer",
+            "title": "Chunk Index",
+            "default": 0
+          },
+          "distance": {
+            "type": "number",
+            "title": "Distance",
+            "default": 0.0
+          },
+          "similarity_score": {
+            "type": "number",
+            "title": "Similarity Score",
+            "default": 0.0
+          },
+          "distance_metric": {
+            "type": "string",
+            "title": "Distance Metric",
+            "default": "cosine_distance"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "source_file",
+          "category"
+        ],
+        "title": "KnowledgeMatchItem"
+      },
+      "KnowledgeQueryRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": 5
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "source_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source File"
+          },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "machine_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine Id"
+          },
+          "part_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Number"
+          },
+          "record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "KnowledgeQueryRequest"
+      },
+      "KnowledgeQueryResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer"
+          },
+          "answer_mode": {
+            "type": "string",
+            "title": "Answer Mode"
+          },
+          "llm_enabled": {
+            "type": "boolean",
+            "title": "Llm Enabled"
+          },
+          "results_count": {
+            "type": "integer",
+            "title": "Results Count"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeMatchItem"
+            },
+            "type": "array",
+            "title": "Matches",
+            "default": []
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources",
+            "default": []
+          },
+          "distance_metric": {
+            "type": "string",
+            "title": "Distance Metric",
+            "default": "cosine_distance"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "answer",
+          "answer_mode",
+          "llm_enabled",
+          "results_count"
+        ],
+        "title": "KnowledgeQueryResponse"
+      },
+      "KnowledgeStatusResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "collection_name": {
+            "type": "string",
+            "title": "Collection Name"
+          },
+          "persist_directory": {
+            "type": "string",
+            "title": "Persist Directory"
+          },
+          "document_count": {
+            "type": "integer",
+            "title": "Document Count"
+          },
+          "embedding_model": {
+            "type": "string",
+            "title": "Embedding Model"
+          },
+          "embedding_type": {
+            "type": "string",
+            "title": "Embedding Type"
+          },
+          "llm_mode": {
+            "type": "string",
+            "title": "Llm Mode"
+          },
+          "llm_enabled": {
+            "type": "boolean",
+            "title": "Llm Enabled"
+          },
+          "available_source_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Source Files",
+            "default": []
+          },
+          "last_ingestion": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ingestion"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "collection_name",
+          "persist_directory",
+          "document_count",
+          "embedding_model",
+          "embedding_type",
+          "llm_mode",
+          "llm_enabled"
+        ],
+        "title": "KnowledgeStatusResponse"
+      },
+      "LoginPayload": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "User email (admin, engineer, operator)",
+            "example": "engineer@precisionaero.com"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "User password",
+            "example": "Engineer123!"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginPayload"
+      },
+      "ManualInspectionPayload": {
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "title": "Batch Id",
+            "default": "BATCH-0245",
+            "example": "BATCH-0245"
+          },
+          "nominal_mm": {
+            "type": "number",
+            "title": "Nominal Mm",
+            "default": 50.0,
+            "example": 50.0
+          },
+          "tolerance_mm": {
+            "type": "number",
+            "title": "Tolerance Mm",
+            "default": 0.05,
+            "example": 0.05
+          },
+          "measurements": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Measurements",
+            "default": [
+              {
+                "part_serial": "P001",
+                "measured_value": 50.01
+              },
+              {
+                "part_serial": "P002",
+                "measured_value": 50.03
+              },
+              {
+                "part_serial": "P003",
+                "measured_value": 50.06
+              },
+              {
+                "part_serial": "P004",
+                "measured_value": 50.08
+              },
+              {
+                "part_serial": "P005",
+                "measured_value": 50.07
+              }
+            ],
+            "example": [
+              {
+                "measured_value": 50.01,
+                "part_serial": "P001"
+              },
+              {
+                "measured_value": 50.03,
+                "part_serial": "P002"
+              },
+              {
+                "measured_value": 50.06,
+                "part_serial": "P003"
+              },
+              {
+                "measured_value": 50.08,
+                "part_serial": "P004"
+              },
+              {
+                "measured_value": 50.07,
+                "part_serial": "P005"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ManualInspectionPayload"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "OAuth2PasswordBearer": {
+        "type": "oauth2",
+        "flows": {
+          "password": {
+            "scopes": {},
+            "tokenUrl": "/api/auth/login"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Authentication, persona tokens, and RBAC profile"
+    },
+    {
+      "name": "Products & Machines",
+      "description": "Product catalogs, machine assets, and nominal specifications"
+    },
+    {
+      "name": "Batches",
+      "description": "Production batch management and anchor batch tracking"
+    },
+    {
+      "name": "Inspection",
+      "description": "Dimensional inspection intake and boundary-safe spec verification (Agent 1 & Agent 3)"
+    },
+    {
+      "name": "Vision",
+      "description": "Visual surface defect detection and proxy localization (Agent 2)"
+    },
+    {
+      "name": "Process Monitoring",
+      "description": "Real-time CNC telemetry, machine vibration, and anomaly detection (Agent 4)"
+    },
+    {
+      "name": "SPC & Capability",
+      "description": "Statistical Process Control, I-MR charts, Nelson rules, and Cp/Cpk indices (Agent 5)"
+    },
+    {
+      "name": "Incidents",
+      "description": "Quality incident records and Non-Conformance Reports (NCR)"
+    },
+    {
+      "name": "Root Cause Analysis",
+      "description": "5-Whys, 6M Ishikawa, and evidence-weighted causal reasoning (Agent 6)"
+    },
+    {
+      "name": "RAG",
+      "description": "In-process ChromaDB vector knowledge retrieval and SOP search"
+    },
+    {
+      "name": "Pareto",
+      "description": "Defect distribution and Vital Few analysis (IATF 16949)"
+    },
+    {
+      "name": "CAPA",
+      "description": "Corrective and Preventive Action planning and containment (Agent 7)"
+    },
+    {
+      "name": "Workflows (Agents)",
+      "description": "Stateful 8-Agent orchestration network and execution traces"
+    },
+    {
+      "name": "Effectiveness",
+      "description": "Two-proportion z-test statistical verification of CAPA efficacy"
+    },
+    {
+      "name": "Dashboard",
+      "description": "Aggregated factory floor metrics and real-time plant KPIs"
+    },
+    {
+      "name": "Reports",
+      "description": "ISO 9001 / IATF 16949 audit dossier PDF generation"
+    },
+    {
+      "name": "System",
+      "description": "Platform health, version telemetry, and runtime diagnostics"
+    }
+  ]
+}
