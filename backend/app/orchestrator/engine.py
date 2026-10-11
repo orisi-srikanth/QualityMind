@@ -6,14 +6,14 @@ import uuid
 import time
 from typing import Dict, Any, Optional, List
 from backend.app.orchestrator.state import WorkflowState
-from backend.app.agents.data_intake_agent import data_intake_agent
-from backend.app.agents.vision_agent import vision_agent
-from backend.app.agents.compliance_agent import compliance_agent
-from backend.app.agents.anomaly_agent import anomaly_agent
+from backend.app.agents.intake_agent import data_intake_agent
+from backend.app.agents.visual_agent import vision_agent
+from backend.app.agents.dimensional_agent import compliance_agent
+from backend.app.agents.process_agent import anomaly_agent
 from backend.app.agents.spc_agent import spc_agent
 from backend.app.agents.rca_agent import rca_agent
 from backend.app.agents.capa_agent import capa_agent
-from backend.app.agents.critic_agent import critic_agent
+from backend.app.agents.reviewer_agent import critic_agent
 
 class QualityWorkflowOrchestrator:
     def __init__(self):

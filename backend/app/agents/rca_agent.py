@@ -386,3 +386,10 @@ class RootCauseAnalysisAgent(BaseQualityAgent):
         }
 
 rca_agent = RootCauseAnalysisAgent()
+RCAAgent = RootCauseAnalysisAgent
+
+__all__ = [
+    "RootCauseAnalysisAgent",
+    "RCAAgent",
+    "rca_agent",
+]

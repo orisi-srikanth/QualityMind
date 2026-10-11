@@ -175,3 +175,10 @@ class CorrectivePreventiveActionAgent(BaseQualityAgent):
         }
 
 capa_agent = CorrectivePreventiveActionAgent()
+CAPAAgent = CorrectivePreventiveActionAgent
+
+__all__ = [
+    "CorrectivePreventiveActionAgent",
+    "CAPAAgent",
+    "capa_agent",
+]

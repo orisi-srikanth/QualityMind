@@ -205,3 +205,10 @@ class StatisticalProcessControlAgent(BaseQualityAgent):
         }
 
 spc_agent = StatisticalProcessControlAgent()
+SPCAgent = StatisticalProcessControlAgent
+
+__all__ = [
+    "StatisticalProcessControlAgent",
+    "SPCAgent",
+    "spc_agent",
+]
