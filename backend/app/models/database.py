@@ -8,11 +8,22 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, Text, DateTime, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "quality_system.db"))
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+from backend.app.core.config import settings
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+connect_args = {}
+if db_url.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+    if "///" in db_url:
+        db_file = db_url.split("///")[-1]
+        os.makedirs(os.path.dirname(os.path.abspath(db_file)), exist_ok=True)
+
+engine = create_engine(db_url, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
