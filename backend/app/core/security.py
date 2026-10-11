@@ -5,7 +5,11 @@ Enforces industrial authorization: only quality_engineer and admin can confirm/a
 from enum import Enum
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-import jwt
+try:
+    import jwt
+except ImportError:
+    from jose import jwt
+
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -38,7 +42,7 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         return payload
-    except jwt.PyJWTError:
+    except Exception:
         return None
 
 def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[Dict[str, Any]]:
