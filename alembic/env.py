@@ -7,11 +7,20 @@ from sqlalchemy import pool
 
 from alembic import context
 
-# Ensure backend package is in python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Ensure both backend and repo root are in python path
+_env_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_dir = os.path.dirname(_env_dir)
+_backend_dir = os.path.join(_repo_dir, "backend")
+for _p in [_repo_dir, _backend_dir]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-from backend.app.core.config import settings
-from backend.app.db.models import Base
+try:
+    from backend.app.core.config import settings
+    from backend.app.db.models import Base
+except ImportError:
+    from app.core.config import settings
+    from app.db.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
