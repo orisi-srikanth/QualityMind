@@ -1,14 +1,29 @@
+# Machine Learning Dataset Assets
 backend/data/mvtec_ad/
 data/mvtec_ad/
+
+# Python Cache & Environment
 *.pyc
 __pycache__/
 .env
 .pytest_cache/
-node_modules/
-frontend/node_modules/
-dist/
-frontend/dist/
 .venv/
 venv/
 *.sqlite3-journal
 
+# Node & Frontend Build
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# Workspace & Tool Clutter Archive
+_archive_not_required/
+.gemini/
+.antigravity/
+.cursor/
+.claude/
+.vscode/
+*.bak
+*.old
+powershell.exe
