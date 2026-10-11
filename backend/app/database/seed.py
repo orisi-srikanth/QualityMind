@@ -133,8 +133,80 @@ def seed_database():
                 ),
             ]
             db.add_all(chars)
+            db.commit()
 
-        # 5. Seed Process Baselines for CNC-04
+        # 4.5 Seed Production Batches from batches.csv
+        if db.query(Batch).filter(Batch.batch_number == "BATCH-0245").count() == 0:
+            batches_csv = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "production", "batches.csv"))
+            if os.path.exists(batches_csv):
+                import pandas as pd
+                df_b = pd.read_csv(batches_csv)
+                batches_to_add = []
+                for _, r in df_b.iterrows():
+                    b_num = str(r["batch_number"]).strip()
+                    if not db.query(Batch).filter_by(batch_number=b_num).first():
+                        try:
+                            s_time = datetime.strptime(str(r["start_time"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        except Exception:
+                            s_time = datetime.now(timezone.utc)
+                        try:
+                            e_time = datetime.strptime(str(r["end_time"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        except Exception:
+                            e_time = datetime.now(timezone.utc)
+                        
+                        b_id_val = "batch-0245" if b_num == "BATCH-0245" else f"batch-{b_num.lower()}"
+                        batches_to_add.append(
+                            Batch(
+                                id=b_id_val,
+                                batch_number=b_num,
+                                product_id=str(r["product_id"]),
+                                machine_id=str(r["machine_id"]),
+                                shift=str(r.get("shift", "Day Shift")),
+                                quantity=int(r.get("quantity", 500)),
+                                material_lot=str(r.get("material_lot", "LOT-RAW")),
+                                operator_ref=str(r.get("operator_ref", "OP-01")),
+                                start_time=s_time,
+                                end_time=e_time,
+                                status=str(r.get("status", "CONFORMING")),
+                                scenario_label=str(r.get("scenario_label", "NORMAL_PRODUCTION")) if pd.notna(r.get("scenario_label")) else None
+                            )
+                        )
+                if batches_to_add:
+                    db.add_all(batches_to_add)
+                    db.commit()
+
+        # 4.6 Seed Measurements from measurements.csv
+        if db.query(Measurement).count() == 0:
+            meas_csv = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "inspection", "measurements.csv"))
+            if os.path.exists(meas_csv):
+                import pandas as pd
+                df_m = pd.read_csv(meas_csv)
+                batch_obj_map = {b.batch_number: b.id for b in db.query(Batch).all()}
+                batch_obj_map.update({b.id: b.id for b in db.query(Batch).all()})
+                meas_to_add = []
+                for _, r in df_m.iterrows():
+                    target_b = batch_obj_map.get(str(r["batch_id"]).strip())
+                    if target_b:
+                        try:
+                            m_time = datetime.strptime(str(r["measured_at"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        except Exception:
+                            m_time = datetime.now(timezone.utc)
+                        meas_to_add.append(
+                            Measurement(
+                                batch_id=target_b,
+                                characteristic_id=str(r["characteristic_id"]),
+                                component_id=str(r["component_id"]),
+                                value=float(r["value"]),
+                                unit=str(r.get("unit", "mm")),
+                                measured_at=m_time,
+                                subgroup=int(r.get("subgroup", 1)),
+                                status=str(r.get("status", "conforming")),
+                                deviation_from_limit=float(r.get("deviation_from_limit", 0.0))
+                            )
+                        )
+                if meas_to_add:
+                    db.bulk_save_objects(meas_to_add)
+                    db.commit()
         if db.query(ProcessBaseline).count() < 32:
             baselines = []
             for m_id in ["mach-01", "mach-02", "mach-03", "mach-04"]:
@@ -295,6 +367,8 @@ def seed_database():
 
             for inc_id, b_num, def_type, rej_reason, sev, c_at, confirmed_cause in incident_specs:
                 target_b_id = b_map.get(b_num, b_id)
+                if not db.query(Batch).filter_by(id=target_b_id).first():
+                    target_b_id = b_id
                 incidents_to_add.append(
                     QualityIncident(
                         id=inc_id,
