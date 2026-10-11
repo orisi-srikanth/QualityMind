@@ -1,88 +1,144 @@
-# Computer Vision Model Card: Two-Stage Industrial Defect Inspector v2.0 (MVTec AD)
+# Computer Vision Model Card: Synthetic Machined Shaft Defect Inspector v1.0
 
-## Model Overview
-- **Model Architecture:** Two-Stage Industrial Computer Vision System
-  - **Stage A: PatchCore Anomaly Localization & Scoring** — Memory-bank anomaly detection leveraging multi-scale feature hierarchies (ResNet/WideResNet mid-level layers) with greedy coreset subsampling. Constructs category-specific normal memory banks built strictly from `train/good` images.
-  - **Stage B: Defect-Type Classifier** — Transfer learning with MobileNetV3-Small backbone fine-tuned on the unified defect taxonomy with effective class-weighted Cross-Entropy loss and cosine annealing schedule.
-- **Explainability:** Morphological heatmap contour extraction and bounding-box localization (Stage A) + Grad-CAM activation saliency maps (Stage B).
-- **Inference Latency:** **11.87 ms** per image on standard CPU (Benchmarked on x86/ARM CPU, satisfying the < 2.0 s constraint).
-- **Export Artifacts:** PyTorch memory banks (`patchcore_banks.pt`), PyTorch classifier weights (`cv_model.pt`), optimized ONNX runtime (`cv_model.onnx`, 4.3 MB), calibrated thresholds (`thresholds.json`).
+## 1. Model Overview
+- **Model Architecture:** MobileNetV3-Small Transfer Learning Classifier + Grad-CAM Spatial Localization
+- **Primary Domain:** Precision Machined Cylindrical Steel Shafts
+- **Primary Training Dataset:** Synthetic Machined Shafts Dataset (procedurally generated via `data/generate_shaft_images.py`)
+- **Classes (6 Total):**
+  1. `no_defect` (Conforming baseline)
+  2. `surface_scratch` (Axial and circumferential surface scoring)
+  3. `dent` (Radial impact gouges and impressions)
+  4. `crack` (High-frequency structural fissures)
+  5. `missing_feature` (Omission of machined keyway or snap-ring groove)
+  6. `incorrect_assembly` (Misplaced or incorrect retaining collar)
+- **Explainability & Localization:** Grad-CAM activation heatmaps extracted from the final convolutional feature extractor layer (`features[-1]`), thresholded at 50% peak activation to extract bounding box coordinates $[x, y, w, h]$ and contour overlays.
+- **Inference Latency:** **7.46 ms per image** on standard CPU (Benchmarked via ONNX Runtime / PyTorch, well under the 2,000 ms constraint).
+- **Export Artifacts:**
+  - PyTorch Weights: `backend/models/cv_model.pt` (6.2 MB)
+  - ONNX Model: `backend/models/cv_model.onnx` (6.0 MB, Opset 14)
+  - Metrics & Thresholds: `backend/models/cv_metrics.json`
 - **Epistemic Classification:** `[MODEL_PREDICTION]`.
-- **License & Attribution:** MVTec Anomaly Detection (MVTec AD) dataset is licensed under **CC BY-NC-SA 4.0** (Non-Commercial, ShareAlike).
-  - *Citation:* P. Bergmann, M. Fauser, D. Sattlegger, C. Steger. "MVTec AD — A Comprehensive Real-World Dataset for Unsupervised Anomaly Detection", IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2019.
 
 ---
 
-## Dataset & Proxy Parts Description
-- **Dataset Source:** Real MVTec AD industrial surface anomaly detection dataset.
-- **Scope Restriction:** Strictly restricted to 4 industrial categories representing assembly and turned component proxies:
-  1. `metal_nut` (242 normal, 93 defect test, 93 ground-truth masks)
-  2. `screw` (361 normal, 119 defect test, 119 ground-truth masks)
-  3. `transistor` (273 normal, 40 defect test, 40 ground-truth masks)
-  4. `cable` (282 normal, 92 defect test, 92 ground-truth masks)
-  *Total Evaluated:* 1,502 image files across the 4 approved categories. The remaining 11 categories in MVTec AD are completely excluded.
-- **Unified Taxonomy Label Map (`data/mvtec_label_map.yaml`):**
-  - `metal_nut`: scratch -> `surface_scratch`, bent -> `dent_deformation`, flip -> `incorrect_assembly`, color -> `surface_contamination`
-  - `screw`: scratch_head & scratch_neck -> `surface_scratch`, manipulated_front -> `dent_deformation`, thread_side & thread_top -> `thread_damage`
-  - `transistor`: misplaced -> `incorrect_assembly`, cut_lead & bent_lead -> `missing_component`, damaged_case -> `dent_deformation`
-  - `cable`: missing_wire & missing_cable -> `missing_component`, cable_swap -> `incorrect_assembly`, bent_wire / cut_inner_insulation / cut_outer_insulation / poke_insulation -> `insulation_or_wire_damage`
-- **Zero Leakage Split Generation:**
-  - `train`: 1,071 images (830 train/good normal + 241 defect images)
-  - `val`: 202 images (147 train/good held-out normal + 55 defect images for calibration)
-  - `test`: 229 images (181 test/good normal + 48 defect images)
-  - Zero intersection between `train`, `val`, and `test` verified. Zero tuning on the test split.
+## 2. Dataset Split & Zero-Leakage Architecture
+
+- **Total Images:** 2,820 images (512x512 RGB)
+- **Standard Split (70/15/15):**
+  - **Train:** 1,764 images (294 per class)
+  - **Validation:** 378 images (63 per class)
+  - **Normal Test:** 378 images (63 per class)
+- **Hard Test Split:** 300 images (50 per class) generated with unseen lighting angles, extreme contrast, heavy Gaussian blur ($\sigma \in [2.5, 4.0]$), and multiplicative shot noise.
+- **Group-Based Stratification:** Splitting performed at the geometric cluster level (`group_id = f"grp_{class_idx}_{batch_idx}"`). All augmentations and variations of a specific shaft parameter configuration remain strictly within a single partition.
+- **Zero-Leakage Verification:**
+  - Exact SHA-256 Hash Collisions: **0** across Train, Val, Test, Hard Test.
+  - 256-Bit Perceptual Hash (DCT pHash) Collisions: **0** across Train, Val, Test, Hard Test.
 
 ---
 
-## Honest Evaluation Metrics (Held-Out Test Split)
+## 3. Evaluation Metrics: Normal Test vs. Hard Test
 
-### Stage A: PatchCore Anomaly Detection & Localisation
-Memory banks built strictly from `train/good`. Calibrated thresholds applied to held-out test split.
+Evaluated via `ml/cv/evaluate.py`. No hyperparameters or weights were tuned on the test splits.
 
-| Category | Image AUROC | Pixel AUROC | Localisation IoU | Localisation Dice | Boxes with IoU >= 0.5 |
-|---|---|---|---|---|---|
-| `metal_nut` | **0.9545** | 0.9483 | 0.3923 | 0.5234 | 53.3% |
-| `screw` | **0.4720** | 0.8919 | 0.0000 | 0.0000 | 0.0% |
-| `transistor` | **0.9792** | 0.9077 | 0.3304 | 0.4518 | 75.0% |
-| `cable` | **0.9914** | 0.9692 | 0.3931 | 0.5215 | 41.7% |
-| **Overall** | **0.8585** | **0.9302** | **0.2484** | **0.3316** | **33.3% (mAP@0.5: 0.3333)** |
+### 3.1 Normal Test Split (In-Distribution, 378 images)
 
-> [!NOTE]
-> **Screw Performance Commentary:** Screw global image AUROC is 0.4720 because specular reflections and thread rotation angles introduce high PatchCore feature variance relative to the un-rotated memory bank. However, pixel AUROC is 0.8919, confirming that when defects are scored locally, anomaly density correctly peaks at the defect region. Real metrics are reported transparently without artificial test-set tuning.
+| Defect Class | Precision | Recall | F1-Score | Support |
+|:---|:---:|:---:|:---:|:---:|
+| `no_defect` | 0.9538 | 0.9841 | 0.9688 | 63 |
+| `surface_scratch` | 0.9815 | 0.8413 | 0.9060 | 63 |
+| `dent` | 1.0000 | 1.0000 | 1.0000 | 63 |
+| `crack` | 0.8857 | 0.9841 | 0.9323 | 63 |
+| `missing_feature` | 1.0000 | 1.0000 | 1.0000 | 63 |
+| `incorrect_assembly` | 1.0000 | 1.0000 | 1.0000 | 63 |
+| **Macro Average** | **0.9702** | **0.9683** | **0.9678** | **378** |
+| **Overall Accuracy** | — | — | **0.9683 (96.8%)** | **378** |
 
----
+- **Mean Localization IoU (against generator ground truth masks):** **0.2437**
+- **Boxes with IoU >= 0.5:** **16.4%**
+- **mAP@0.5 (Localization):** **0.1640**
 
-### Stage B: Defect Classification (MobileNetV3-Small)
-Evaluated on the held-out test split across 8 unified classes:
-
-| Unified Defect Class | Precision | Recall | F1-Score | Test Support |
-|---|---|---|---|---|
-| `no_defect` | 0.9632 | 0.8674 | 0.9128 | 181 |
-| `surface_scratch` | 1.0000 | 0.5000 | 0.6667 | 10 |
-| `dent_deformation` | 1.0000 | 0.2857 | 0.4444 | 7 |
-| `incorrect_assembly` | 1.0000 | 0.8571 | 0.9231 | 7 |
-| `surface_contamination` | 1.0000 | 1.0000 | 1.0000 | 4 |
-| `thread_damage` | 0.6154 | 1.0000 | 0.7619 | 8 |
-| `missing_component` | 0.1786 | 1.0000 | 0.3030 | 5 |
-| `insulation_or_wire_damage` | 0.6250 | 0.7143 | 0.6667 | 7 |
-| **Macro Average** | **0.7978** | **0.7781** | **0.7098** | **229** |
-| **Overall Accuracy** | — | — | **0.8384** | **229** |
-
-### 5-Fold Cross-Validation (Classifier Small-Sample Variability)
-To honestly address the small-sample limitation of having only ~10 defect images in certain classes:
-- **Fold 1:** Macro-F1 = 0.8223
-- **Fold 2:** Macro-F1 = 0.7724
-- **Fold 3:** Macro-F1 = 0.8510
-- **Fold 4:** Macro-F1 = 0.7529
-- **Fold 5:** Macro-F1 = 0.7901
-- **5-Fold Cross-Validation Macro-F1:** **0.7977 ± 0.0351**
+#### Normal Test Confusion Matrix
+| True \ Pred | `no_defect` | `surface_scratch` | `dent` | `crack` | `missing_feature` | `incorrect_assembly` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `no_defect` | 62 | 0 | 0 | 1 | 0 | 0 |
+| `surface_scratch` | 3 | 53 | 0 | 7 | 0 | 0 |
+| `dent` | 0 | 0 | 63 | 0 | 0 | 0 |
+| `crack` | 0 | 1 | 0 | 62 | 0 | 0 |
+| `missing_feature` | 0 | 0 | 0 | 0 | 63 | 0 |
+| `incorrect_assembly` | 0 | 0 | 0 | 0 | 0 | 63 |
 
 ---
 
-## Known Limitations & Governance Guardrails
-1. **Proxy Parts Only:** MVTec AD does NOT contain precision CNC turned shafts. Screws, metal nuts, transistors, and cables serve strictly as real-world industrial proxy parts.
-2. **Absence of Cracks:** Cracks do not exist in the 4 selected MVTec AD categories. The system explicitly does NOT claim or fake crack detection.
-3. **Controlled Environment:** Images in MVTec AD were captured under laboratory lighting and fixed camera distances; actual factory floor deployment requires camera calibration.
-4. **Small-Sample Classes:** Certain defect classes (such as transistor damaged case or bent lead) contain fewer than 15 total images in the original dataset.
-5. **Academic Prototype:** This model is designed as an academic decision-support prototype, not an autonomous production disposition system.
-6. **Uncertain & Out-of-Domain Routing:** Predictions with confidence below 0.70 return `defect_type="uncertain"`. Images matching none of the 4 approved categories return `category="out_of_domain"` with zero defect attribution, automatically routing to the human engineer review queue.
+### 3.2 Hard Test Split (Severe Distribution Shift, 300 images)
+
+Evaluated under unseen environmental corruptions (heavy blur, extreme contrast, multi-source glare):
+
+| Defect Class | Precision | Recall | F1-Score | Support |
+|:---|:---:|:---:|:---:|:---:|
+| `no_defect` | 0.2500 | 1.0000 | 0.4000 | 50 |
+| `surface_scratch` | 1.0000 | 0.0400 | 0.0769 | 50 |
+| `dent` | 1.0000 | 0.1800 | 0.3051 | 50 |
+| `crack` | 0.4348 | 0.4000 | 0.4167 | 50 |
+| `missing_feature` | 0.9048 | 0.3800 | 0.5352 | 50 |
+| `incorrect_assembly` | 1.0000 | 0.4400 | 0.6111 | 50 |
+| **Macro Average** | **0.7649** | **0.4067** | **0.3908** | **300** |
+| **Overall Accuracy** | — | — | **0.4067 (40.7%)** | **300** |
+
+- **Mean Localization IoU:** **0.2068**
+- **Boxes with IoU >= 0.5:** **16.67%**
+- **mAP@0.5:** **0.1667**
+
+---
+
+### 3.3 Performance Drop (Normal Test vs. Hard Test)
+
+| Metric | Normal Test | Hard Test | Absolute Drop ($\Delta$) | Relative Degradation |
+|:---|:---:|:---:|:---:|:---:|
+| **Macro-F1** | 0.9678 | 0.3908 | **+0.5770** | **-59.6%** |
+| **Accuracy** | 0.9683 | 0.4067 | **+0.5616** | **-58.0%** |
+| **Localization IoU** | 0.2437 | 0.2068 | **+0.0369** | **-15.1%** |
+| **mAP@0.5** | 0.1640 | 0.1667 | -0.0027 | +1.6% |
+
+> [!WARNING]
+> **Domain Shift Commentary:**
+> When subjected to heavy Gaussian blur and unseen illumination angles, shallow textural defects (`surface_scratch` and `dent`) are frequently absorbed into the background cylinder model, leading to false-negative predictions (`no_defect` recall is 100%, but precision falls to 25.0%). Structural defects (`incorrect_assembly`, `missing_feature`) demonstrate greater resilience (F1: 0.53–0.61). This significant drop (+0.5770 Macro-F1 drop) demonstrates why synthetic vision performance cannot be assumed to transfer to uncontrolled factory floor conditions without calibration.
+
+---
+
+## 4. Qualitative Samples & Grad-CAM Visualizations
+
+Visual inspection samples with ground truth (green) and predicted Grad-CAM bounding boxes (red) are preserved in:
+- Normal Test Samples: `docs/cv_samples/sample_1.png` through `docs/cv_samples/sample_6.png`
+- Hard Test Samples: `docs/cv_samples/sample_7.png` through `docs/cv_samples/sample_12.png`
+- Normal Test Confusion Matrix: `docs/cv_samples/confusion_matrix_normal.png`
+- Hard Test Confusion Matrix: `docs/cv_samples/confusion_matrix_hard.png`
+
+---
+
+## 5. External Real-Image Benchmark (MVTec AD Sanity Check)
+
+To evaluate domain transfer to real metallic components without claiming validation on shafts, the trained model was evaluated on real held-out MVTec AD images (`metal_nut` and `screw`):
+
+- **Benchmark Scope:** 60 held-out real test images (15 good + 15 scratch for `metal_nut`, 15 good + 15 scratch for `screw`).
+- **Binary Decision:** Conforming (`no_defect`) vs Defective (`surface_scratch` or other defect).
+- **Results:**
+  - `metal_nut` Accuracy: **43.3%** (13/30)
+  - `screw` Accuracy: **56.7%** (17/30)
+  - **Overall Sanity Check Accuracy:** **50.0% (30/60)**
+- **Domain-Gap Caveat:**
+  Hexagonal fastener edges and screw thread ridges trigger strong edge activations in the shaft model, causing false defect classifications on conforming nuts and screws. This external check confirms that the model's representations are tuned to cylindrical turned shaft geometry and cannot be naively deployed onto unrelated fastener geometries.
+
+---
+
+## 6. Honest Engineering Disclosure & Governance Guardrails
+
+1. **Synthetic Training Origin:**
+   The vision model is trained strictly on synthetic shaft images generated procedurally with OpenCV/NumPy/PIL.
+2. **Optimistic Metrics:**
+   The in-distribution performance (Macro-F1: 0.9678) is optimistic compared to real factory environments with variable lens contamination, oil mist, ambient vibration, and lighting fluctuations.
+3. **Not Validated on Real Shaft Photos:**
+   The model has **not** been validated on physical factory shaft photographs and is **not production-grade**.
+4. **Uncalibrated Model Confidence:**
+   Softmax output scores represent uncalibrated network confidence, not calibrated Bayesian posterior probabilities.
+5. **Mandatory Human Review:**
+   All vision inferences carry `label: "MODEL_PREDICTION"` and `data_source: "synthetic"`. Per IATF 16949 decision-support protocols, automated disposition is prohibited; every flagged defect must be routed to a quality engineer review queue.

@@ -91,8 +91,7 @@ class Settings(BaseSettings):
     CHROMA_PATH: str = os.path.join(DATA_DIR, "chroma_db")
     KNOWLEDGE_DB_PATH: str = os.path.join(DATA_DIR, "knowledge_db")
     KNOWLEDGE_DOCS_PATH: str = os.path.join(DATA_DIR, "knowledge_docs")
-    KNOWLEDGE_COLLECTION_NAME: str = "qualityminds_quality_knowledge"
-    MVTEC_ROOT: str = r"D:\Projects Local\BV-DATASETS\mvtec_anomaly_detection"
+    MVTEC_ROOT: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

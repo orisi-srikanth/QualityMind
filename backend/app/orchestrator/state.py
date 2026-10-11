@@ -32,4 +32,6 @@ class WorkflowState(BaseModel):
     has_defects: bool = False
     has_anomalies: bool = False
     has_spc_violations: bool = False
+    product_mismatch: bool = False
+    product_mismatch_warning: Optional[str] = None
     completed_at: Optional[str] = None

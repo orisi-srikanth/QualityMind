@@ -4,6 +4,16 @@ Agentic AI Manufacturing Quality Inspection & Root Cause Analysis System
 Serves unified REST API, Static inspection media, and Production React Frontend.
 """
 import os
+import sys
+
+# Ensure both repo root and backend directory are in sys.path
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_backend_dir = os.path.dirname(_current_dir)
+_repo_dir = os.path.dirname(_backend_dir)
+for _d in [_repo_dir, _backend_dir]:
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

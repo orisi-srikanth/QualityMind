@@ -41,7 +41,10 @@ class QualityWorkflowGraphState(TypedDict, total=False):
     execution_trace: List[Dict[str, Any]]
     has_defects: bool
     has_anomalies: bool
+    has_spc_violations: bool
     reassessment_loops: int
+    product_mismatch: Optional[bool]
+    product_mismatch_warning: Optional[str]
     error_message: Optional[str]
 
 # --- Graph Node Functions ---
@@ -71,10 +74,29 @@ def node_visual(state: QualityWorkflowGraphState) -> Dict[str, Any]:
         res = vision_agent.inspect(image_path=img_path, batch_id=batch_id, image_id=f"IMG-{batch_id}")
         pred = res["prediction"].model_dump()
         trace.append(res["log"].model_dump())
-        has_def = bool(pred.get("defect_detected", False))
+
+        batch_meta = state.get("batch_metadata", {})
+        batch_prod = (batch_meta.get("part_name") or batch_meta.get("product_name") or "Precision Ground Shaft").lower()
+        img_cat = (pred.get("product_category") or pred.get("category") or "").lower()
+
+        is_mismatch = False
+        mismatch_msg = None
+        if ("shaft" in batch_prod and "shaft" not in img_cat) or ("screw" in batch_prod and "screw" not in img_cat):
+            is_mismatch = True
+            mismatch_msg = (
+                f"PRODUCT MISMATCH DETECTED: Uploaded inspection image represents category '{img_cat}' "
+                f"({pred.get('defect_type')}), but selected batch {batch_id} is for product '{batch_meta.get('part_name', 'Precision Ground Shaft')}'. "
+                f"Finding quarantined from batch dimensional disposition."
+            )
+            pred["product_mismatch"] = True
+            pred["mismatch_warning"] = mismatch_msg
+
+        has_def = bool(pred.get("defect_detected", False)) and not is_mismatch
         return {
             "current_agent": vision_agent.name,
             "visual_prediction": pred,
+            "product_mismatch": is_mismatch,
+            "product_mismatch_warning": mismatch_msg,
             "has_defects": has_def or state.get("has_defects", False),
             "execution_trace": trace
         }
@@ -139,9 +161,11 @@ def node_spc(state: QualityWorkflowGraphState) -> Dict[str, Any]:
     trace = list(state.get("execution_trace", []))
     trace.append(res["log"].model_dump())
     
+    has_spc = bool(len(rep.get("nelson_violations", [])) > 0 or (rep.get("cpk") is not None and rep.get("cpk") < 1.0))
     return {
         "current_agent": spc_agent.name,
         "spc_report": rep,
+        "has_spc_violations": has_spc,
         "execution_trace": trace
     }
 
@@ -155,12 +179,36 @@ def node_rca(state: QualityWorkflowGraphState) -> Dict[str, Any]:
     d_rep = state.get("dimensional_report")
     
     dt = "Oversized shaft diameter"
-    cat = "metal_nut"
-    if v_pred and v_pred.get("defect_detected"):
+    cat = "precision_shaft"
+    is_mismatch = state.get("product_mismatch", False) or (v_pred and v_pred.get("product_mismatch", False))
+    if v_pred and v_pred.get("defect_detected") and not is_mismatch:
         dt = v_pred.get("defect_type", dt)
         cat = v_pred.get("category", cat)
     elif d_rep and d_rep.get("nonconforming", 0) > 0:
         dt = "Oversized shaft diameter"
+    
+    # Ensure QualityIncident is recorded in database without duplicate on re-run
+    try:
+        from backend.app.database.session import SessionLocal
+        from backend.app.database.models import QualityIncident, Batch
+        db = SessionLocal()
+        b = db.query(Batch).filter((Batch.batch_number == batch_id) | (Batch.id == batch_id)).first()
+        b_id = b.id if b else batch_id
+        existing_inc = db.query(QualityIncident).filter(QualityIncident.batch_id == b_id).first()
+        if not existing_inc:
+            new_inc = QualityIncident(
+                id=f"INC-{batch_id}",
+                batch_id=b_id,
+                title=f"Dimensional Non-Conformance: {dt}",
+                defect_type=dt,
+                severity="HIGH",
+                status="OPEN"
+            )
+            db.add(new_inc)
+            db.commit()
+        db.close()
+    except Exception:
+        pass
     
     res = rca_agent.analyze_incident(
         incident_id=f"INC-{batch_id}",
@@ -256,8 +304,8 @@ def route_after_intake(state: QualityWorkflowGraphState) -> str:
     return "visual_inspection"
 
 def route_after_spc(state: QualityWorkflowGraphState) -> str:
-    """Conditional Edge: If batch is 100% conforming with no anomalies, skip RCA and CAPA (TC-01)."""
-    if not state.get("has_defects", False) and not state.get("has_anomalies", False):
+    """Conditional Edge: If batch is 100% conforming with no anomalies or SPC signals, skip RCA and CAPA (TC-01)."""
+    if not state.get("has_defects", False) and not state.get("has_anomalies", False) and not state.get("has_spc_violations", False):
         return "final_report"
     return "root_cause_analysis"
 
@@ -265,7 +313,7 @@ def route_after_critic(state: QualityWorkflowGraphState) -> str:
     """Conditional Loop: If Critic requests reassessment, loop back to RCA (max 2 loops)."""
     rev = state.get("critic_review", {})
     loops = state.get("reassessment_loops", 0)
-    if rev.get("critic_verdict") == "REASSESS" and loops < 2:
+    if rev.get("critic_verdict") in ("REASSESS", "REASSESSMENT_REQUIRED") and loops < 2:
         state["reassessment_loops"] = loops + 1
         return "root_cause_analysis"
     return "capa_management"
@@ -318,8 +366,9 @@ def create_qualitymind_graph():
 
     # 3. Checkpointer for state persistence & HITL interrupts
     checkpointer = MemorySaver()
-    graph = builder.compile(checkpointer=checkpointer)
+    graph = builder.compile(checkpointer=checkpointer, interrupt_before=["approval_gate"])
     return graph
 
 # Pre-compiled global LangGraph workflow
 qualitymind_langgraph = create_qualitymind_graph()
+

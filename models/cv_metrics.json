@@ -1,168 +1,94 @@
 {
-  "dataset": "MVTec AD (4 approved categories: metal_nut, screw, transistor, cable)",
-  "evaluation_timestamp": "2026-10-10T23:42:22Z",
-  "stage_a_anomaly_detection": {
-    "overall_image_auroc": 0.8585,
-    "overall_pixel_auroc": 0.9302,
-    "overall_localisation_iou": 0.2484,
-    "overall_localisation_dice": 0.3316,
-    "overall_pct_boxes_iou_gte_05": 33.33,
-    "mAP_at_05": 0.3333,
-    "per_category": {
-      "metal_nut": {
-        "image_auroc": 0.9545,
-        "precision": 1.0,
-        "recall": 0.8667,
-        "f1_score": 0.9286,
-        "pixel_auroc": 0.9483,
-        "localisation_iou": 0.3923,
-        "localisation_dice": 0.5234,
-        "pct_boxes_iou_gte_05": 53.33
-      },
-      "screw": {
-        "image_auroc": 0.472,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1_score": 0.0,
-        "pixel_auroc": 0.8919,
-        "localisation_iou": 0.0,
-        "localisation_dice": 0.0,
-        "pct_boxes_iou_gte_05": 0.0
-      },
-      "transistor": {
-        "image_auroc": 0.9792,
-        "precision": 1.0,
-        "recall": 0.75,
-        "f1_score": 0.8571,
-        "pixel_auroc": 0.9077,
-        "localisation_iou": 0.3304,
-        "localisation_dice": 0.4518,
-        "pct_boxes_iou_gte_05": 75.0
-      },
-      "cable": {
-        "image_auroc": 0.9914,
-        "precision": 0.9091,
-        "recall": 0.8333,
-        "f1_score": 0.8696,
-        "pixel_auroc": 0.9692,
-        "localisation_iou": 0.3931,
-        "localisation_dice": 0.5215,
-        "pct_boxes_iou_gte_05": 41.67
-      }
-    }
-  },
-  "stage_b_defect_classification": {
-    "overall_accuracy": 0.8384,
-    "macro_f1": 0.7098,
+  "dataset": "Synthetic Precision Ground Shafts (Procedural Engine)",
+  "evaluation_timestamp": "2026-10-11T08:26:50Z",
+  "data_source": "synthetic",
+  "model_version": "synthetic-shaft-v1.0",
+  "model_architecture": "MobileNetV3-Small Transfer Learning + Grad-CAM Localizer",
+  "classes": [
+    "no_defect",
+    "surface_scratch",
+    "dent",
+    "crack",
+    "missing_feature",
+    "incorrect_assembly"
+  ],
+  "normal_test_split": {
+    "sample_count": 378,
+    "accuracy": 0.9683,
+    "macro_f1": 0.9678,
+    "macro_precision": 0.9702,
+    "macro_recall": 0.9683,
+    "mean_localisation_iou": 0.2437,
+    "pct_boxes_iou_gte_05": 16.4,
+    "mAP_at_05": 0.164,
     "per_class": {
       "no_defect": {
-        "precision": 0.9632,
-        "recall": 0.8674,
-        "f1_score": 0.9128,
-        "support": 181
+        "precision": 0.9538,
+        "recall": 0.9841,
+        "f1": 0.9688,
+        "support": 63
       },
       "surface_scratch": {
-        "precision": 1.0,
-        "recall": 0.5,
-        "f1_score": 0.6667,
-        "support": 10
+        "precision": 0.9815,
+        "recall": 0.8413,
+        "f1": 0.906,
+        "support": 63
       },
-      "dent_deformation": {
+      "dent": {
         "precision": 1.0,
-        "recall": 0.2857,
-        "f1_score": 0.4444,
-        "support": 7
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 63
+      },
+      "crack": {
+        "precision": 0.8857,
+        "recall": 0.9841,
+        "f1": 0.9323,
+        "support": 63
+      },
+      "missing_feature": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 63
       },
       "incorrect_assembly": {
         "precision": 1.0,
-        "recall": 0.8571,
-        "f1_score": 0.9231,
-        "support": 7
-      },
-      "surface_contamination": {
-        "precision": 1.0,
         "recall": 1.0,
-        "f1_score": 1.0,
-        "support": 4
-      },
-      "thread_damage": {
-        "precision": 0.6154,
-        "recall": 1.0,
-        "f1_score": 0.7619,
-        "support": 8
-      },
-      "missing_component": {
-        "precision": 0.1786,
-        "recall": 1.0,
-        "f1_score": 0.303,
-        "support": 5
-      },
-      "insulation_or_wire_damage": {
-        "precision": 0.625,
-        "recall": 0.7143,
-        "f1_score": 0.6667,
-        "support": 7
+        "f1": 1.0,
+        "support": 63
       }
-    },
-    "five_fold_cv_macro_f1": {
-      "mean": 0.7977,
-      "std": 0.0351,
-      "fold_scores": [
-        0.8223,
-        0.7724,
-        0.851,
-        0.7529,
-        0.7901
-      ]
     },
     "confusion_matrix": [
       [
-        157,
+        62,
         0,
         0,
-        0,
-        0,
-        0,
-        21,
-        3
-      ],
-      [
-        2,
-        5,
-        0,
-        0,
-        0,
-        3,
+        1,
         0,
         0
       ],
       [
         3,
+        53,
         0,
-        2,
-        0,
-        0,
-        2,
+        7,
         0,
         0
       ],
       [
         0,
         0,
+        63,
         0,
-        6,
         0,
+        0
+      ],
+      [
         0,
         1,
-        0
-      ],
-      [
         0,
-        0,
-        0,
-        0,
-        4,
-        0,
+        62,
         0,
         0
       ],
@@ -171,9 +97,7 @@
         0,
         0,
         0,
-        0,
-        8,
-        0,
+        63,
         0
       ],
       [
@@ -182,27 +106,118 @@
         0,
         0,
         0,
-        0,
-        5,
-        0
-      ],
-      [
-        1,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1,
-        5
+        63
       ]
     ]
   },
-  "limitations": [
-    "MVTec AD consists of proxy parts (nuts, screws, transistors, cables) and does NOT contain precision machined shafts.",
-    "Lighting and camera perspective are highly controlled under laboratory conditions.",
-    "Small defect sample size: classes such as transistor defects have only ~10 images per class.",
-    "Cracks are NOT present in the 4 selected MVTec AD categories and are explicitly unsupported.",
-    "Academic prototype implementation; not intended for uncalibrated direct production deployment."
-  ]
+  "hard_test_split": {
+    "sample_count": 300,
+    "accuracy": 0.4067,
+    "macro_f1": 0.3908,
+    "macro_precision": 0.7649,
+    "macro_recall": 0.4067,
+    "mean_localisation_iou": 0.2068,
+    "pct_boxes_iou_gte_05": 16.67,
+    "mAP_at_05": 0.1667,
+    "per_class": {
+      "no_defect": {
+        "precision": 0.25,
+        "recall": 1.0,
+        "f1": 0.4,
+        "support": 50
+      },
+      "surface_scratch": {
+        "precision": 1.0,
+        "recall": 0.04,
+        "f1": 0.0769,
+        "support": 50
+      },
+      "dent": {
+        "precision": 1.0,
+        "recall": 0.18,
+        "f1": 0.3051,
+        "support": 50
+      },
+      "crack": {
+        "precision": 0.4348,
+        "recall": 0.4,
+        "f1": 0.4167,
+        "support": 50
+      },
+      "missing_feature": {
+        "precision": 0.9048,
+        "recall": 0.38,
+        "f1": 0.5352,
+        "support": 50
+      },
+      "incorrect_assembly": {
+        "precision": 1.0,
+        "recall": 0.44,
+        "f1": 0.6111,
+        "support": 50
+      }
+    },
+    "confusion_matrix": [
+      [
+        50,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        44,
+        2,
+        0,
+        4,
+        0,
+        0
+      ],
+      [
+        19,
+        0,
+        9,
+        22,
+        0,
+        0
+      ],
+      [
+        30,
+        0,
+        0,
+        20,
+        0,
+        0
+      ],
+      [
+        31,
+        0,
+        0,
+        0,
+        19,
+        0
+      ],
+      [
+        26,
+        0,
+        0,
+        0,
+        2,
+        22
+      ]
+    ]
+  },
+  "performance_drop_normal_vs_hard": {
+    "macro_f1_drop": 0.577,
+    "accuracy_drop": 0.5616,
+    "localisation_iou_drop": 0.0369,
+    "pct_boxes_gte_05_drop": -0.27,
+    "mAP_at_05_drop": -0.0027
+  },
+  "honest_disclosure": {
+    "statement": "The vision model is trained on synthetic shaft images generated by our procedural script. Metrics are optimistic compared to real factory images. The model is not validated on real production shaft photos and is NOT production-grade without physical factory calibration.",
+    "data_source": "synthetic",
+    "uncalibrated_probabilities_notice": "Raw softmax outputs are uncalibrated model confidences, not true calibrated Bayesian posterior probabilities. Human engineering review remains mandatory."
+  }
 }

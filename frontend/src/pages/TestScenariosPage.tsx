@@ -54,18 +54,18 @@ export const TestScenariosPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Mandated Scenario Evaluation Suite (TC-01 to TC-08)</h2>
-          <p className="text-xs text-slate-500">
-            Automated test harness verifying all 8 evaluation criteria with exact evidence and pass/fail audits.
+          <h2 className="text-[26px] font-bold text-slate-900 leading-tight">Test Scenarios</h2>
+          <p className="text-[14px] text-slate-500 mt-1">
+            System validation suite and automated test scenario verification.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={loadAll}
-            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+            className="btn-primary !h-[40px]"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Re-Run All 8 Scenarios</span>
+            <RefreshCw className="w-4 h-4 text-white" />
+            <span>Re-Run All Scenarios</span>
           </button>
         </div>
       </div>
@@ -74,19 +74,19 @@ export const TestScenariosPage: React.FC = () => {
       <div className={`p-5 rounded-xl border flex items-center justify-between gap-4 ${
         allPassed ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"
       }`}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3.5">
           <div className="p-2.5 rounded-lg bg-emerald-100 text-emerald-800">
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-sm font-bold text-emerald-950 flex items-center gap-2">
-              <span>ALL 8 EVALUATION TEST SCENARIOS PASSED (100% SUCCESS)</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-200 text-emerald-900">
+            <div className="text-[15px] font-bold text-emerald-950 flex items-center gap-2">
+              <span>All 8 System Test Scenarios Passed (100% Success)</span>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-200 text-emerald-900 font-tabular">
                 8 / 8 Passing
               </span>
             </div>
-            <p className="text-xs text-emerald-800 mt-0.5">
-              Verified dimensional tolerances, PyTorch CV localization, vibration anomalies, Nelson drift, RAG retrieval, hypothesis ranking, and CAPA effectiveness.
+            <p className="text-[13px] text-emerald-800 mt-0.5">
+              Verified dimensional tolerances, visual inspection localization, telemetry anomalies, control rules, and CAPA effectiveness.
             </p>
           </div>
         </div>

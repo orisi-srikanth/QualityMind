@@ -163,5 +163,37 @@ def make_splits(manifest_path: Path = None, output_json_path: Path = None) -> Di
 
     return splits_data
 
+def verify_shaft_splits(splits_path: Path = None) -> Dict[str, Any]:
+    """Audits synthetic shaft splits for zero SHA-256 and perceptual hash leakage."""
+    project_root = Path(__file__).resolve().parent.parent.parent
+    if splits_path is None:
+        splits_path = project_root / "data" / "synthetic_shafts" / "splits.json"
+
+    with open(splits_path, "r", encoding="utf-8") as f:
+        splits = json.load(f)
+
+    train_sha = {r["sha256"] for r in splits["train"]}
+    val_sha = {r["sha256"] for r in splits["val"]}
+    test_sha = {r["sha256"] for r in splits["test"]}
+    hard_sha = {r["sha256"] for r in splits["hard_test"]}
+
+    train_phash = {r["phash"] for r in splits["train"]}
+    val_phash = {r["phash"] for r in splits["val"]}
+    test_phash = {r["phash"] for r in splits["test"]}
+    hard_phash = {r["phash"] for r in splits["hard_test"]}
+
+    sha_overlap = len(train_sha & val_sha) + len(train_sha & test_sha) + len(train_sha & hard_sha) + len(val_sha & test_sha) + len(val_sha & hard_sha) + len(test_sha & hard_sha)
+    phash_overlap = len(train_phash & val_phash) + len(train_phash & test_phash) + len(train_phash & hard_phash) + len(val_phash & test_phash) + len(val_phash & hard_phash) + len(test_phash & hard_phash)
+
+    return {
+        "train_count": len(splits["train"]),
+        "val_count": len(splits["val"]),
+        "test_count": len(splits["test"]),
+        "hard_test_count": len(splits["hard_test"]),
+        "sha256_overlap_count": sha_overlap,
+        "phash_overlap_count": phash_overlap,
+    }
+
 if __name__ == "__main__":
     make_splits()
+

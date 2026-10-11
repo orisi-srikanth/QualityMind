@@ -25,17 +25,19 @@ export type float = number;
 
 export interface ProductionBatch {
   batch_id: string;
-  product_id: string;
-  part_number: string;
-  machine: string;
-  material: string;
+  product_id?: string;
+  part_number?: string;
+  machine?: string;
+  machine_id?: string;
+  material?: string;
   material_lot: string;
   shift: string;
   quantity: number;
   start_time: string;
   end_time?: string;
   status: string;
-  operator: string;
+  operator?: string;
+  operator_ref?: string;
   rejection_rate?: string;
   nonconforming_count?: number;
 }
@@ -62,6 +64,38 @@ export interface InspectionReport {
   usl: number;
   lsl: number;
   certainty: CertaintyLevel;
+  mean?: number;
+  std_dev_sample?: number;
+  min?: number;
+  max?: number;
+  max_deviation_from_limit?: number;
+  histogram_bins?: Array<{
+    bin: string;
+    edge_low?: number;
+    edge_high?: number;
+    count: number;
+    is_out_of_spec?: boolean;
+    color?: string;
+  }>;
+  nonconforming_items?: Array<{
+    sample_id: string;
+    component_id?: string;
+    measured_value: number;
+    nominal_mm?: number;
+    limit_breached: string;
+    deviation_from_limit: number;
+    deviation_from_nominal?: number;
+    tolerance_band_usage_percent?: number;
+  }>;
+  distribution?: {
+    mean?: number;
+    std_dev_sample?: number;
+    min?: number;
+    max?: number;
+    bin_edges?: number[];
+    counts?: number[];
+  };
+  disposition_notice?: string;
 }
 
 export interface BoundingBox {
@@ -71,19 +105,42 @@ export interface BoundingBox {
   height: number;
 }
 
+export interface DefectItem {
+  defect_type: string;
+  confidence: number;
+  bounding_box: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  };
+  location_zone: string;
+  segmentation_mask?: string;
+}
+
 export interface VisualDefectPrediction {
   image_id: string;
   batch_id: string;
   source?: string;
+  data_source?: string;
   category?: string;
+  product_category?: string;
   defect_detected: boolean;
   anomaly_score?: number;
   defect_type: string;
   raw_class?: string;
   confidence: number;
   location: string;
+  location_zone?: string;
   bbox?: BoundingBox;
   bounding_box?: BoundingBox;
+  defects?: DefectItem[];
+  segmentation_mask?: string;
+  review_status?: string;
   severity: string;
   certainty: CertaintyLevel;
   label?: string;
@@ -143,10 +200,19 @@ export interface SPCReport {
   cl: number;
   usl: number;
   lsl: number;
-  cp: number;
-  cpk: number;
-  pp: number;
-  ppk: number;
+  cp: number | null;
+  cpk: number | null;
+  pp: number | null;
+  ppk: number | null;
+  status?: string;
+  warnings?: string[];
+  sigma_within?: number | null;
+  sigma_within_method?: string;
+  sigma_overall?: number | null;
+  sigma_overall_method?: string;
+  interpretation_band?: string;
+  guidance_notice?: string;
+  future_guarantee_disclaimer?: string;
   capability_assessment: string;
   chart_data: Array<{
     sample_index: number;
@@ -167,13 +233,27 @@ export interface SPCReport {
 
 export interface HypothesisEvidence {
   hypothesis_id: string;
+  rank?: number;
   title: string;
   description: string;
   category: string;
   confidence_score: number;
+  evidence_score?: number;
+  score_breakdown?: {
+    base_weight: number;
+    sum_supporting: number;
+    sum_contradicting: number;
+    net_difference: number;
+    multiplier: number;
+    formula: string;
+  };
   supporting_evidence: string[];
   contradicting_evidence: string[];
+  missing_evidence?: string[];
   required_confirmation: string;
+  sources?: string[];
+  confidence_text?: string;
+  epistemic_label?: string;
   status: string;
   certainty: CertaintyLevel;
 }
@@ -200,6 +280,7 @@ export interface HistoricalIncident {
   confirmed_root_cause: string;
   similarity_score: number;
   action_taken: string;
+  disclaimer?: string;
   certainty: CertaintyLevel;
 }
 
@@ -207,10 +288,23 @@ export interface RCAReport {
   incident_id: string;
   batch_id: string;
   problem_statement: string;
+  rca_inputs?: any;
   ranked_hypotheses: HypothesisEvidence[];
   five_whys: FiveWhysItem[];
   fishbone_diagram: FishboneCategory[];
   historical_matches: HistoricalIncident[];
+  correlations?: Array<{
+    parameter_x: string;
+    parameter_y: string;
+    pearson_r: number;
+    pearson_p_value: number;
+    spearman_rho: number;
+    spearman_p_value: number;
+    sample_size: number;
+    disclaimer: string;
+  }>;
+  temporal_precedence?: any;
+  pareto_causes?: any;
   correlation_vs_causation_note: string;
   certainty: CertaintyLevel;
 }
@@ -225,6 +319,30 @@ export interface ActionItem {
   evidence_required: string;
   completion_date?: string;
   effectiveness_metric?: string;
+}
+
+export interface CAPAActionRecord {
+  id: string;
+  action_id: string;
+  action_code: string;
+  incident_id: string;
+  hypothesis_id?: string | null;
+  type: string; // containment, corrective, preventive
+  description: string;
+  suggested_role?: string | null;
+  responsible_role?: string | null;
+  assigned_role: string;
+  due_date: string;
+  status: string; // proposed, approved, in_progress, completed, verified, rejected
+  evidence?: string;
+  evidence_file_path?: string | null;
+  completion_date?: string | null;
+  effectiveness_result?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at?: string | null;
+  created_by?: string | null;
+  is_overdue: boolean;
 }
 
 export interface CAPAReport {

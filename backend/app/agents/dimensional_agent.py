@@ -1,12 +1,15 @@
 """
 Agent 3: Dimensional & Specification Compliance Agent
-Performs deterministic comparison of measured product characteristics against engineering specifications.
+Performs 100% deterministic comparison of measured product characteristics against engineering specifications.
 Calculates deviations, rejection percentages, and flags specification non-conformances.
+Uses SpecificationEngine (Decimal/NumPy). Zero LLM involvement in arithmetic or conformance decisions.
 """
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from backend.app.agents.base_agent import BaseQualityAgent
 from backend.app.models.schemas import CertaintyLevel, InspectionReport, MeasurementItem
+from backend.app.services.spec_check import SpecificationEngine
+
 
 class DimensionalComplianceAgent(BaseQualityAgent):
     def __init__(self):
@@ -21,84 +24,78 @@ class DimensionalComplianceAgent(BaseQualityAgent):
         batch_id: str,
         measurements: List[Dict[str, Any]],
         nominal_mm: float = 50.00,
-        tolerance_mm: float = 0.05
+        tolerance_mm: float = 0.05,
+        tol_plus: Optional[float] = None,
+        tol_minus: Optional[float] = None,
+        usl: Optional[float] = None,
+        lsl: Optional[float] = None,
+        parameter_name: str = "shaft_diameter"
     ) -> Dict[str, Any]:
         start = time.time()
         tool_calls = ["tool_calculate_spec_limits", "tool_deterministic_tolerance_check"]
 
-        usl = round(nominal_mm + tolerance_mm, 4)
-        lsl = round(nominal_mm - tolerance_mm, 4)
+        eff_plus = tol_plus if tol_plus is not None else tolerance_mm
+        eff_minus = tol_minus if tol_minus is not None else tolerance_mm
+
+        # Pure deterministic evaluation via SpecificationEngine
+        spec_result = SpecificationEngine.evaluate_compliance(
+            batch_id=batch_id,
+            nominal_mm=nominal_mm,
+            tol_plus=eff_plus,
+            tol_minus=eff_minus,
+            measurements=measurements,
+            parameter_name=parameter_name,
+            usl=usl,
+            lsl=lsl
+        )
 
         evaluated_items: List[MeasurementItem] = []
-        accepted_count = 0
-        nonconforming_count = 0
-
-        for m in measurements:
-            sample_id = m.get("sample_id", "UNK")
-            val = float(m.get("measured_value"))
-            dev_nominal = round(val - nominal_mm, 4)
-
-            dev_limit = 0.0
-            is_conforming = True
-            status = "PASS"
-
-            if val > usl:
-                is_conforming = False
-                dev_limit = round(val - usl, 4)
-                status = "FAIL_HIGH"
-                nonconforming_count += 1
-            elif val < lsl:
-                is_conforming = False
-                dev_limit = round(lsl - val, 4)
-                status = "FAIL_LOW"
-                nonconforming_count += 1
-            else:
-                accepted_count += 1
-
+        for item in spec_result["measurements"]:
             evaluated_items.append(
                 MeasurementItem(
-                    sample_id=sample_id,
-                    measured_value=val,
-                    deviation_from_nominal=dev_nominal,
-                    deviation_from_limit=dev_limit,
-                    is_conforming=is_conforming,
-                    status=status,
+                    sample_id=item["sample_id"],
+                    measured_value=item["measured_value"],
+                    deviation_from_nominal=item["deviation_from_nominal"],
+                    deviation_from_limit=item["deviation_from_limit"],
+                    is_conforming=item["is_conforming"],
+                    status=item["status"],
                     certainty=CertaintyLevel.OBSERVED_FACT
                 )
             )
 
-        total = len(evaluated_items)
-        rejection_pct = round((nonconforming_count / total * 100.0) if total > 0 else 0.0, 2)
+        eff_usl = spec_result["usl"] if spec_result["usl"] is not None else round(nominal_mm + eff_plus, 4)
+        eff_lsl = spec_result["lsl"] if spec_result["lsl"] is not None else round(nominal_mm - eff_minus, 4)
 
         report = InspectionReport(
             batch_id=batch_id,
-            total_inspected=total,
-            accepted=accepted_count,
-            nonconforming=nonconforming_count,
-            rejection_rate_percent=rejection_pct,
+            total_inspected=spec_result["total_inspected"],
+            accepted=spec_result["accepted"],
+            nonconforming=spec_result["nonconforming"],
+            rejection_rate_percent=spec_result["rejection_rate_percent"],
             measurements=evaluated_items,
             nominal_mm=nominal_mm,
-            tolerance_mm=tolerance_mm,
-            usl=usl,
-            lsl=lsl,
+            tolerance_mm=eff_plus,
+            usl=eff_usl,
+            lsl=eff_lsl,
             certainty=CertaintyLevel.OBSERVED_FACT
         )
 
         duration = int((time.time() - start) * 1000)
+        max_dev = spec_result["max_deviation_from_limit"]
         log_entry = self.log_execution(
             step_number=3,
-            input_summary=f"Evaluated {total} measurements against USL={usl}mm, LSL={lsl}mm",
+            input_summary=f"Evaluated {spec_result['total_inspected']} measurements against USL={eff_usl}mm, LSL={eff_lsl}mm",
             tool_calls=tool_calls,
             output_summary=(
-                f"Inspection Results: {nonconforming_count}/{total} nonconforming "
-                f"({rejection_pct}% rejection rate). Nonconforming parts exceed USL by up to "
-                f"+{max([i.deviation_from_limit for i in evaluated_items if not i.is_conforming] or [0.0]):.3f} mm."
+                f"Inspection Results: {spec_result['nonconforming']}/{spec_result['total_inspected']} nonconforming "
+                f"({spec_result['rejection_rate_percent']}% rejection rate). Max deviation: +{max_dev:.4f} mm."
             ),
             duration_ms=duration
         )
 
         return {
             "report": report,
+            "spec_data": spec_result,
             "log": log_entry
         }
 

@@ -180,8 +180,9 @@ The platform provides pre-configured personas for role-based testing:
 | **Req 5** | Dimensional Compliance (Agent 3) | [`backend/app/agents/dimensional_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/dimensional_agent.py), [`backend/app/services/spec_check.py`](file:///d:/Projects%20Local/QT/backend/app/services/spec_check.py) | `python -m pytest backend/tests/test_phase3.py -k test_spec` |
 | **Req 6** | Process Telemetry Anomaly Detection (Agent 4) | [`backend/app/agents/process_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/process_agent.py), [`backend/app/services/anomaly_detection.py`](file:///d:/Projects%20Local/QT/backend/app/services/anomaly_detection.py) | `python -m pytest backend/tests/test_phase4.py -k test_anomaly` |
 | **Req 7** | Statistical Process Control (Agent 5) | [`backend/app/agents/spc_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/spc_agent.py), [`backend/app/services/spc_charts.py`](file:///d:/Projects%20Local/QT/backend/app/services/spc_charts.py) | `python -m pytest backend/tests/test_phase3.py -k test_spc` |
+| **Req 9** | Process Capability Analysis (Cp, Cpk, Pp, Ppk) | [`backend/app/services/capability.py`](file:///d:/Projects%20Local/QT/backend/app/services/capability.py), [`backend/app/routers/spc.py`](file:///d:/Projects%20Local/QT/backend/app/routers/spc.py) | `python -m pytest backend/tests/test_requirement_9_capability.py` |
 | **Req 8** | Root Cause Analysis & 6M Fishbone (Agent 6) | [`backend/app/agents/rca_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/rca_agent.py), [`backend/app/services/rag_search.py`](file:///d:/Projects%20Local/QT/backend/app/services/rag_search.py) | `python -m pytest backend/tests/test_phase6.py -k test_full_agent` |
-| **Req 9** | CAPA Management & Efficacy Test (Agent 7) | [`backend/app/agents/capa_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/capa_agent.py), [`backend/app/services/effectiveness.py`](file:///d:/Projects%20Local/QT/backend/app/services/effectiveness.py) | `python -m pytest backend/tests/test_phase3.py -k test_effectiveness` |
+| **Req 9 (CAPA)** | CAPA Management & Efficacy Test (Agent 7) | [`backend/app/agents/capa_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/capa_agent.py), [`backend/app/services/effectiveness.py`](file:///d:/Projects%20Local/QT/backend/app/services/effectiveness.py) | `python -m pytest backend/tests/test_phase3.py -k test_effectiveness` |
 | **Req 10** | Quality Reviewer & Causal Interceptor (Agent 8)| [`backend/app/agents/reviewer_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/reviewer_agent.py) | `python -m pytest backend/tests/test_phase6.py -k test_critic` |
 | **Req 11** | Stateful Multi-Agent Orchestration | [`backend/app/agents/workflow.py`](file:///d:/Projects%20Local/QT/backend/app/agents/workflow.py), [`backend/app/orchestrator/engine.py`](file:///d:/Projects%20Local/QT/backend/app/orchestrator/engine.py) | `python -m pytest backend/tests/test_langgraph_and_intake.py -k langgraph` |
 | **Req 12** | Vector Knowledge Base Retrieval (RAG) | [`backend/app/agents/quality_knowledge_agent.py`](file:///d:/Projects%20Local/QT/backend/app/agents/quality_knowledge_agent.py), [`backend/app/services/document_loader.py`](file:///d:/Projects%20Local/QT/backend/app/services/document_loader.py) | `python -m pytest backend/tests/test_rag_pipeline.py` |
@@ -194,27 +195,57 @@ The platform provides pre-configured personas for role-based testing:
 ## 6. Data and Model Performance
 
 ### What Data is Real vs Synthetic
-- **Real Data**: Computer vision defect images use real samples from the public **MVTec Anomaly Detection (AD)** benchmark dataset across four industrial categories: `metal_nut` (scratch, bent, color, flip), `screw` (scratch_head, thread, dent), `cable` (bent_wire, cut_insulation, missing_wire), and `transistor` (cut_lead, damaged, misplaced).
-- **Synthetic Data**: CNC process telemetry time series (vibration, spindle speed, feed rate, motor current, coolant temperature), CMM shaft diameter measurements, and historical Non-Conformance Reports (NCR-001 through NCR-020). These are calibrated to realistic physical machining limits for 50 mm AISI 1045 precision shafts turned on CNC lathes.
+- **Primary Vision Dataset (Synthetic)**: 2,820 synthetic machined cylindrical steel shaft images (512x512 RGB) generated procedurally via `data/generate_shaft_images.py` with directional lathe brushing, specular highlights, chamfers, keyways, and grooves across 6 classes: `no_defect`, `surface_scratch`, `dent`, `crack`, `missing_feature`, and `incorrect_assembly`. Group-stratified into 70/15/15 splits (train: 1,764, val: 378, test: 378) with zero hash leakage, plus 300 unseen Hard Test images.
+- **Process & Quality Data (Synthetic)**: CNC process telemetry time series (780 records of vibration, spindle speed, feed rate, motor current, coolant temperature), 365 CMM shaft diameter measurements, and 40 Non-Conformance Reports (NCR-001 through NCR-158). These are calibrated to realistic physical machining limits for 50 mm AISI 1045 precision shafts turned on CNC lathes.
+- **External Benchmark (Real)**: MVTec Anomaly Detection (AD) benchmark dataset (`metal_nut` and `screw`) retained strictly as a read-only external benchmark.
 
 ### Real Model Performance Numbers
-- **Vision Stage 1 (PatchCore ResNet-18 Anomaly Detection)**:
-  - AUROC: **0.982** on metal_nut, **0.978** on screw.
-  - Image inference latency: **42 ms** on GPU, **145 ms** on CPU.
-- **Vision Stage 2 (MobileNetV3 Defect Classification)**:
-  - Test set accuracy: **94.2%**
-  - Defect F1-score: **0.931**
-  - Average inference time: **18 ms**
+- **Vision Model (MobileNetV3-Small Transfer Learning + Grad-CAM Localizer)**:
+  - CPU Inference Latency: **7.46 ms** per image (ONNX runtime / PyTorch, well under the 2,000 ms constraint).
+  - **Normal Test Split (378 images, in-distribution)**:
+    - Overall Accuracy: **96.83%**
+    - Macro-F1: **0.9678** (Macro Precision: 0.9702, Macro Recall: 0.9683)
+    - Per-Class F1: `no_defect` (0.9688), `surface_scratch` (0.9060), `dent` (1.0000), `crack` (0.9323), `missing_feature` (1.0000), `incorrect_assembly` (1.0000)
+    - Mean Localization IoU (Grad-CAM vs Ground Truth Mask): **0.2437**
+    - Bounding Boxes with IoU >= 0.5: **16.4%** (mAP@0.5: **0.1640**)
+  - **Hard Test Split (300 images, severe unseen lighting / contrast / blur / noise)**:
+    - Overall Accuracy: **40.67%**
+    - Macro-F1: **0.3908** (Macro Precision: 0.7649, Macro Recall: 0.4067)
+    - Mean Localization IoU: **0.2068** (Boxes IoU >= 0.5: 16.67%, mAP@0.5: **0.1667**)
+    - Performance Drop: Macro-F1 dropped by **+0.5770** (-59.6% relative), Accuracy dropped by **+0.5616** (-58.0% relative).
+  - **External Real-Image Sanity Check (MVTec AD `metal_nut` & `screw`)**:
+    - 60 held-out real images evaluated out-of-distribution without retraining.
+    - Binary anomaly accuracy: **50.0%** (30/60). Fastener threads and hex corners trigger out-of-domain defect responses, illustrating real-world sim-to-real transfer boundaries.
 - **Process Anomaly Detection (Isolation Forest + Robust Z-Score)**:
   - Precision on synthetic drift events: **96.0%**
   - Recall on sudden tool wear vibration spikes: **100.0%**
-- **Vector Retrieval (ChromaDB + all-MiniLM-L6-v2)**:
-  - Top-1 retrieval accuracy for anchor query against historical incident NCR-019: **100.0%** (cosine similarity score 0.88).
+- **Vector Retrieval (RAG Search + Cosine Similarity)**:
+  - Top-1 retrieval accuracy for anchor query against historical incident NCR-019: **100.0%** (cosine similarity 0.253, top ranked among 47 indexed engineering documents).
 
-### Stated Limitations
-1. The computer vision model was trained on MVTec industrial components as proxy objects; real factory deployment would require fine-tuning on high-resolution photographs of exact plant parts under production lighting.
-2. The CNC telemetry data is synthetically generated from domain physics models rather than a live factory OPC-UA or MTConnect stream.
-3. RAG answers without a configured LLM provider operate in deterministic extractive mode (returning source excerpts directly without conversational summarization).
+### Honest Engineering Disclosure & Stated Limitations
+1. **Synthetic Training Origin**: The vision model is trained strictly on synthetic shaft images generated by our procedural script. Metrics are optimistic compared to real factory conditions with variable lens contamination, oil mist, ambient vibration, and lighting fluctuations.
+2. **Not Production-Grade**: The model has not been validated on physical factory shaft photographs and is not production-grade.
+3. **Uncalibrated Model Confidence**: Softmax output scores represent uncalibrated network confidence, not calibrated Bayesian posterior probabilities.
+4. **Mandatory Human Review**: Automated disposition is strictly prohibited. Every flagged defect carries `data_source: "synthetic"` and routes to the quality engineering review queue.
+
+### Process Capability Sufficiency Thresholds & Statistical Guardrails (Requirement 9)
+QualityMind enforces rigorous sample size sufficiency and assumption guardrails adhering to AIAG SPC Reference Manual (2nd Edition) and IATF 16949:2016 Section 8.5.1:
+
+| Sample Size Window | Capability Status | Numeric Output | Statistical Guardrail & Warning Behavior |
+|:---|:---:|:---:|:---|
+| **$n < 5$** (n = 1, 2, 4) | `insufficient_data` | **Suppressed** (`None`) | Strict refusal; capability indices suppressed. Mandatory warning issued: *"INSUFFICIENT DATA: Sample size too small for statistical capability estimation."* |
+| **$5 \le n < 30$** (n = 5..29) | `preliminary` | **Computed** | Numeric results accompanied by prominent amber warning banner: *"PRELIMINARY SAMPLE SIZE: Below guideline ($n \ge 30$). Indices exhibit wide confidence intervals; do not use for long-term certification."* |
+| **$n \ge 30$** (n = 30+) | `sufficient` | **Computed** | Standard industrial capability estimation conforming to AIAG benchmarks. |
+
+#### Formula Reference & Sigma Distinction
+- **Short-Term Capability ($C_p, C_{pk}$)**: Uses within-subgroup variation $\sigma_{\text{within}}$ ($MR\text{-bar}/d_2, d_2=1.128$ for individuals; $R\text{-bar}/d_2$ for rational subgroups).
+  $$C_p = \frac{\text{USL} - \text{LSL}}{6 \sigma_{\text{within}}}, \quad C_{pk} = \min\left[\frac{\text{USL} - \mu}{3 \sigma_{\text{within}}}, \frac{\mu - \text{LSL}}{3 \sigma_{\text{within}}}\right]$$
+- **Long-Term Performance ($P_p, P_{pk}$)**: Uses total sample standard deviation $s$ ($\text{ddof}=1$).
+  $$P_p = \frac{\text{USL} - \text{LSL}}{6 s}, \quad P_{pk} = \min\left[\frac{\text{USL} - \mu}{3 s}, \frac{\mu - \text{LSL}}{3 s}\right]$$
+- **Golden Dataset Anchor (BATCH-0245, n=5: 50.01, 50.03, 50.06, 50.08, 50.07 mm against USL 50.05, LSL 49.95)**:
+  - $\mu = 50.0500\text{ mm}$, $s = 0.029155\text{ mm}$, $\sigma_{\text{within}} = 0.017730\text{ mm}$
+  - $P_p = 0.5717$, $P_{pk} = 0.0000$, $C_p = 0.9400$, $C_{pk} = 0.0000$ (discrepancy vs independent NumPy $< 10^{-4}$).
+- **Assumption Checks**: Evaluates statistical control (Nelson rules), distribution normality (Shapiro-Wilk, $\alpha=0.05$), zero/near-zero variance ($\sigma < 10^{-7}$ avoidance of division by zero), progressive linear drift, 3-sigma outliers, and heterogeneous machines/batches.
 
 ---
 

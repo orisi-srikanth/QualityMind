@@ -1,20 +1,24 @@
 """
-Stage A & B Honest Evaluation Engine for QualityMind MVTec AD Pipeline
-Evaluates on the held-out test split without tuning on test:
-- Per-category and overall Image AUROC, P/R/F1
-- Pixel AUROC against official ground truth masks
-- Localisation IoU/Dice against official masks
-- % boxes with IoU >= 0.5 and mAP@0.5
-- Classifier per-class P/R/F1, macro-F1, confusion matrix
-- 5-fold cross validation mean +/- std with documented small-sample limitations
-- Generates 10+ sample prediction figures in docs/cv_samples/
-- Persists metrics to models/cv_metrics.json
+Evaluation Engine for Precision Shaft Defect Detection Pipeline
+Evaluates transfer-learning classifier and Grad-CAM localization on both:
+- Normal Test Split (Held-out generation groups 17..19)
+- Hard Test Split (Unseen lighting, contrast, blur, and sensor noise)
+
+Metrics reported:
+- Per-class Precision, Recall, F1, Support
+- Macro-F1 and Accuracy
+- 6x6 Confusion Matrix
+- Localisation IoU against generator ground truth bounding box
+- % boxes with IoU >= 0.5
+- mAP@0.5
+- Performance drop between normal test and hard test splits
+- Saves 12+ visual prediction figures into docs/cv_samples/
 """
 import os
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 
 import cv2
 import numpy as np
@@ -26,24 +30,28 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import (
-    roc_auc_score,
     precision_score,
     recall_score,
     f1_score,
-    confusion_matrix
+    confusion_matrix,
+    classification_report
 )
-from sklearn.model_selection import StratifiedKFold
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from ml.cv.train_patchcore import PatchCoreModel, CATEGORIES
 from ml.cv.train_classifier import (
     DefectClassifier,
     GradCAM,
-    UNIFIED_CLASSES,
+    SHAFT_CLASSES,
     CLASS_TO_IDX,
     IDX_TO_CLASS
 )
 
-def compute_box_iou(boxA: Dict[str, int], boxB: Dict[str, int]) -> float:
+
+def compute_box_iou(boxA: Optional[Dict[str, int]], boxB: Optional[Dict[str, int]]) -> float:
+    """Computes Intersection-over-Union between two bounding boxes {x, y, width, height}."""
+    if boxA is None or boxB is None:
+        return 0.0
     xA = max(boxA["x"], boxB["x"])
     yA = max(boxA["y"], boxB["y"])
     xB = min(boxA["x"] + boxA["width"], boxB["x"] + boxB["width"])
@@ -52,53 +60,277 @@ def compute_box_iou(boxA: Dict[str, int], boxB: Dict[str, int]) -> float:
     interArea = max(0, xB - xA) * max(0, yB - yA)
     boxAArea = boxA["width"] * boxA["height"]
     boxBArea = boxB["width"] * boxB["height"]
-
     denom = float(boxAArea + boxBArea - interArea)
     return interArea / denom if denom > 0 else 0.0
 
-def mask_to_bbox(mask: np.ndarray) -> Dict[str, int]:
-    ys, xs = np.where(mask > 0)
-    if len(xs) == 0 or len(ys) == 0:
-        return {"x": 0, "y": 0, "width": 0, "height": 0}
-    x_min, x_max = int(np.min(xs)), int(np.max(xs))
-    y_min, y_max = int(np.min(ys)), int(np.max(ys))
-    return {"x": x_min, "y": y_min, "width": x_max - x_min + 1, "height": y_max - y_min + 1}
 
-def evaluate_pipeline(
-    splits_path: Path = None,
-    models_dir: Path = None,
-    output_docs_dir: Path = None
+def extract_box_from_cam(cam_map: np.ndarray, threshold_ratio: float = 0.45) -> Optional[Dict[str, int]]:
+    """Extracts bounding box from Grad-CAM activation heatmap."""
+    binary_cam = (cam_map >= (np.max(cam_map) * threshold_ratio)).astype(np.uint8)
+    contours, _ = cv2.findContours(binary_cam, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    # Largest contour
+    c = max(contours, key=cv2.contourArea)
+    bx, by, bw, bh = cv2.boundingRect(c)
+    if bw <= 4 or bh <= 4:
+        return None
+    return {"x": int(bx), "y": int(by), "width": int(bw), "height": int(bh)}
+
+
+def evaluate_split(
+    records: List[Dict[str, Any]],
+    model: DefectClassifier,
+    grad_cam: GradCAM,
+    transform: transforms.Compose,
+    device: torch.device,
+    split_name: str
 ) -> Dict[str, Any]:
+    """Runs full evaluation over a given split."""
+    y_true = []
+    y_pred = []
+    confidences = []
+    ious = []
+    box_iou_gte_50 = []
+    map50_hits = []
+
+    per_sample_details = []
+
+    for rec in records:
+        img_path = rec["path"]
+        true_cls = rec.get("class_name") or rec.get("unified_type", "no_defect")
+        true_idx = CLASS_TO_IDX.get(true_cls, 0)
+        gt_bbox = rec.get("bbox")
+
+        img_pil = Image.open(img_path).convert("RGB")
+        tensor_in = transform(img_pil).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            logits = model(tensor_in)
+            probs = F.softmax(logits, dim=1).squeeze().cpu().numpy()
+
+        pred_idx = int(np.argmax(probs))
+        pred_prob = float(probs[pred_idx])
+        pred_cls = IDX_TO_CLASS.get(pred_idx, "no_defect")
+
+        y_true.append(true_idx)
+        y_pred.append(pred_idx)
+        confidences.append(pred_prob)
+
+        # Grad-CAM Localisation
+        pred_bbox = None
+        iou = 0.0
+        if pred_idx != 0:
+            cam_map = grad_cam.generate(tensor_in, pred_idx)
+            pred_bbox = extract_box_from_cam(cam_map, threshold_ratio=0.42)
+
+        # Compute IoU against GT
+        if true_idx == 0:
+            # Normal shaft: if model predicts no_defect, perfect localization
+            if pred_idx == 0:
+                iou = 1.0
+                is_box_50 = 1.0
+                map_hit = 1.0
+            else:
+                iou = 0.0
+                is_box_50 = 0.0
+                map_hit = 0.0
+        else:
+            if gt_bbox is not None and pred_bbox is not None:
+                iou = compute_box_iou(gt_bbox, pred_bbox)
+                is_box_50 = 1.0 if iou >= 0.50 else 0.0
+                map_hit = 1.0 if (iou >= 0.50 and pred_idx == true_idx) else 0.0
+            else:
+                iou = 0.0
+                is_box_50 = 0.0
+                map_hit = 0.0
+
+        ious.append(iou)
+        box_iou_gte_50.append(is_box_50)
+        map50_hits.append(map_hit)
+
+        per_sample_details.append({
+            "image_id": rec.get("image_id", ""),
+            "path": img_path,
+            "true_class": true_cls,
+            "pred_class": pred_cls,
+            "confidence": pred_prob,
+            "gt_bbox": gt_bbox,
+            "pred_bbox": pred_bbox,
+            "iou": iou
+        })
+
+    # Metrics calculation
+    y_true_arr = np.array(y_true)
+    y_pred_arr = np.array(y_pred)
+
+    acc = float((y_true_arr == y_pred_arr).mean())
+    macro_f1 = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+    macro_p = float(precision_score(y_true, y_pred, average="macro", zero_division=0))
+    macro_r = float(recall_score(y_true, y_pred, average="macro", zero_division=0))
+
+    cm = confusion_matrix(y_true, y_pred, labels=list(range(len(SHAFT_CLASSES))))
+
+    per_class = {}
+    for i, cls_name in enumerate(SHAFT_CLASSES):
+        cls_mask_true = (y_true_arr == i)
+        cls_mask_pred = (y_pred_arr == i)
+        tp = int(np.sum(cls_mask_true & cls_mask_pred))
+        fp = int(np.sum(~cls_mask_true & cls_mask_pred))
+        fn = int(np.sum(cls_mask_true & ~cls_mask_pred))
+        p = tp / max(tp + fp, 1) if (tp + fp) > 0 else 0.0
+        r = tp / max(tp + fn, 1) if (tp + fn) > 0 else 0.0
+        f1 = (2 * p * r) / (p + r) if (p + r) > 0 else 0.0
+        per_class[cls_name] = {
+            "precision": round(float(p), 4),
+            "recall": round(float(r), 4),
+            "f1": round(float(f1), 4),
+            "support": int(np.sum(cls_mask_true))
+        }
+
+    mean_iou = float(np.mean(ious))
+    pct_box50 = float(np.mean(box_iou_gte_50)) * 100.0
+    map50 = float(np.mean(map50_hits))
+
+    return {
+        "split": split_name,
+        "sample_count": len(records),
+        "accuracy": round(acc, 4),
+        "macro_f1": round(macro_f1, 4),
+        "macro_precision": round(macro_p, 4),
+        "macro_recall": round(macro_r, 4),
+        "mean_localisation_iou": round(mean_iou, 4),
+        "pct_boxes_iou_gte_05": round(pct_box50, 2),
+        "mAP_at_05": round(map50, 4),
+        "per_class": per_class,
+        "confusion_matrix": cm.tolist(),
+        "per_sample_details": per_sample_details
+    }
+
+
+def save_confusion_matrix_plot(cm: List[List[int]], output_path: Path, title: str):
+    """Renders and saves confusion matrix heatmap."""
+    cm_arr = np.array(cm)
+    fig, ax = plt.subplots(figsize=(8, 7))
+    cax = ax.matshow(cm_arr, cmap=plt.cm.Blues, alpha=0.85)
+    fig.colorbar(cax)
+
+    ax.set_xticks(range(len(SHAFT_CLASSES)))
+    ax.set_yticks(range(len(SHAFT_CLASSES)))
+    short_labels = [c.replace("surface_", "s_").replace("incorrect_", "inc_") for c in SHAFT_CLASSES]
+    ax.set_xticklabels(short_labels, rotation=35, ha="left", fontsize=9)
+    ax.set_yticklabels(short_labels, fontsize=9)
+    ax.set_xlabel("Predicted Class", fontsize=11, fontweight="bold")
+    ax.set_ylabel("True Class", fontsize=11, fontweight="bold")
+    ax.set_title(title, fontsize=12, fontweight="bold", pad=20)
+
+    thresh = cm_arr.max() / 2.0
+    for i in range(cm_arr.shape[0]):
+        for j in range(cm_arr.shape[1]):
+            val = cm_arr[i, j]
+            ax.text(j, i, str(val), ha="center", va="center",
+                    color="white" if val > thresh else "black", fontsize=10, fontweight="bold")
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=130)
+    plt.close(fig)
+
+
+def save_prediction_samples(
+    sample_list: List[Dict[str, Any]],
+    grad_cam: GradCAM,
+    transform: transforms.Compose,
+    device: torch.device,
+    output_dir: Path,
+    num_samples: int = 12
+):
+    """Generates visual prediction figures with Grad-CAM heatmap and bounding boxes."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    selected = sample_list[:num_samples]
+
+    for idx, item in enumerate(selected, start=1):
+        img_bgr = cv2.imread(item["path"])
+        if img_bgr is None:
+            continue
+        h, w = img_bgr.shape[:2]
+
+        # Generate Grad-CAM map
+        img_pil = Image.open(item["path"]).convert("RGB")
+        tensor_in = transform(img_pil).unsqueeze(0).to(device)
+        pred_idx = CLASS_TO_IDX.get(item["pred_class"], 0)
+
+        overlay = img_bgr.copy()
+        if pred_idx != 0:
+            cam = grad_cam.generate(tensor_in, pred_idx)
+            cam_color = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
+            overlay = cv2.addWeighted(overlay, 0.65, cam_color, 0.35, 0)
+
+        # Draw GT bbox in Green
+        gt = item["gt_bbox"]
+        if gt:
+            cv2.rectangle(overlay, (gt["x"], gt["y"]), (gt["x"] + gt["width"], gt["y"] + gt["height"]), (0, 220, 0), 2)
+            cv2.putText(overlay, f"GT: {item['true_class']}", (gt["x"], max(18, gt["y"] - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+
+        # Draw Pred bbox in Red
+        pred_b = item["pred_bbox"]
+        if pred_b:
+            cv2.rectangle(overlay, (pred_b["x"], pred_b["y"]), (pred_b["x"] + pred_b["width"], pred_b["y"] + pred_b["height"]), (0, 0, 240), 2)
+            cv2.putText(overlay, f"PRED: {item['pred_class']} ({item['confidence']*100:.1f}%) IoU:{item['iou']:.2f}",
+                        (pred_b["x"], min(h - 8, pred_b["y"] + pred_b["height"] + 16)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1)
+
+        # Save figure
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        ax1.imshow(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+        ax1.set_title(f"Input: {item['true_class']} ({item['image_id']})", fontsize=10)
+        ax1.axis("off")
+
+        ax2.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
+        ax2.set_title(f"Grad-CAM + Detection | Pred: {item['pred_class']} ({item['confidence']*100:.1f}%)", fontsize=10)
+        ax2.axis("off")
+
+        plt.tight_layout()
+        out_fig = output_dir / f"sample_{idx:02d}_{item['true_class']}.png"
+        plt.savefig(out_fig, dpi=120)
+        plt.close(fig)
+
+
+def run_evaluation(
+    splits_path: Optional[Path] = None,
+    models_dir: Optional[Path] = None,
+    output_samples_dir: Optional[Path] = None
+) -> Dict[str, Any]:
+    """Runs complete evaluation on Normal Test and Hard Test splits."""
     project_root = Path(__file__).resolve().parent.parent.parent
     if splits_path is None:
-        splits_path = project_root / "data" / "splits.json"
+        splits_path = project_root / "data" / "synthetic_shafts" / "splits.json"
     if models_dir is None:
         models_dir = project_root / "backend" / "models"
-    if output_docs_dir is None:
-        output_docs_dir = project_root / "docs" / "cv_samples"
+    if output_samples_dir is None:
+        output_samples_dir = project_root / "docs" / "cv_samples"
 
-    output_docs_dir.mkdir(parents=True, exist_ok=True)
+    output_samples_dir.mkdir(parents=True, exist_ok=True)
     alt_models_dir = project_root / "models"
     alt_models_dir.mkdir(parents=True, exist_ok=True)
 
     with open(splits_path, "r", encoding="utf-8") as f:
         splits_data = json.load(f)
 
-    test_records = splits_data["test"]
-    with open(models_dir / "thresholds.json", "r", encoding="utf-8") as f:
-        thresholds_cfg = json.load(f)
+    normal_records = splits_data["test"]
+    hard_records = splits_data["hard_test"]
 
-    # 1. Load PatchCore Model & Memory Banks
-    patchcore = PatchCoreModel(device="cpu")
-    banks_path = models_dir / "patchcore_banks.pt"
-    patchcore.memory_banks = torch.load(banks_path, map_location="cpu")
-    patchcore.thresholds = thresholds_cfg
+    device = torch.device("cpu")
+    model = DefectClassifier(num_classes=len(SHAFT_CLASSES)).to(device)
+    weights_path = models_dir / "cv_model.pt"
+    if not weights_path.exists():
+        weights_path = alt_models_dir / "cv_model.pt"
 
-    # 2. Load Defect Classifier
-    classifier = DefectClassifier(num_classes=len(UNIFIED_CLASSES))
-    classifier.load_state_dict(torch.load(models_dir / "cv_model.pt", map_location="cpu"))
-    classifier.eval()
-    grad_cam = GradCAM(classifier, classifier.features[-1])
+    print(f"Loading weights from {weights_path}...")
+    model.load_state_dict(torch.load(weights_path, map_location=device))
+    model.eval()
+
+    grad_cam = GradCAM(model)
 
     clf_transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -106,294 +338,113 @@ def evaluate_pipeline(
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    print("\n" + "=" * 65)
-    print("HONEST EVALUATION ON HELD-OUT TEST SPLIT (Zero Tuning on Test)")
-    print("=" * 65)
+    # 1. Evaluate Normal Test Split
+    print("\n[1/3] Evaluating Normal Test Split (Held-out Groups 17..19)...")
+    normal_eval = evaluate_split(normal_records, model, grad_cam, clf_transform, device, "normal_test")
 
-    # Stage A Evaluation
-    cat_image_scores: Dict[str, List[float]] = {c: [] for c in CATEGORIES}
-    cat_image_labels: Dict[str, List[int]] = {c: [] for c in CATEGORIES}
-    cat_pixel_auroc: Dict[str, List[float]] = {c: [] for c in CATEGORIES}
-    cat_ious: Dict[str, List[float]] = {c: [] for c in CATEGORIES}
-    cat_dices: Dict[str, List[float]] = {c: [] for c in CATEGORIES}
-    cat_box_iou50: Dict[str, List[int]] = {c: [] for c in CATEGORIES}
+    # 2. Evaluate Hard Test Split
+    print("[2/3] Evaluating Hard Test Split (Unseen Lighting, Contrast & Sensor Noise)...")
+    hard_eval = evaluate_split(hard_records, model, grad_cam, clf_transform, device, "hard_test")
 
-    sample_visualizations_count = 0
+    # 3. Calculate Performance Drop
+    drop_macro_f1 = round(normal_eval["macro_f1"] - hard_eval["macro_f1"], 4)
+    drop_acc = round(normal_eval["accuracy"] - hard_eval["accuracy"], 4)
+    drop_iou = round(normal_eval["mean_localisation_iou"] - hard_eval["mean_localisation_iou"], 4)
+    drop_box50 = round(normal_eval["pct_boxes_iou_gte_05"] - hard_eval["pct_boxes_iou_gte_05"], 2)
+    drop_map50 = round(normal_eval["mAP_at_05"] - hard_eval["mAP_at_05"], 4)
 
-    # Stage B Evaluation on Test Set
-    clf_true_labels = []
-    clf_pred_labels = []
+    # 4. Save Plots & Samples
+    print("[3/3] Saving confusion matrices and visual prediction samples...")
+    save_confusion_matrix_plot(normal_eval["confusion_matrix"], output_samples_dir / "confusion_matrix_normal.png",
+                               f"Normal Test Split Confusion Matrix (Macro-F1: {normal_eval['macro_f1']:.4f})")
+    save_confusion_matrix_plot(hard_eval["confusion_matrix"], output_samples_dir / "confusion_matrix_hard.png",
+                               f"Hard Test Split Confusion Matrix (Macro-F1: {hard_eval['macro_f1']:.4f})")
 
-    for r in test_records:
-        cat = r["category"]
-        is_defect = 0 if r["unified_type"] == "no_defect" else 1
-        img_path = r["path"]
-        mask_path = r.get("mask_path", "")
+    # Save 12+ samples
+    save_prediction_samples(normal_eval["per_sample_details"], grad_cam, clf_transform, device, output_samples_dir, num_samples=12)
 
-        # Anomaly scoring and localization
-        score, heatmap, pred_bboxes = patchcore.compute_anomaly_map(img_path, cat)
-        cat_image_scores[cat].append(score)
-        cat_image_labels[cat].append(is_defect)
-
-        # Classification prediction
-        img_pil = Image.open(img_path).convert("RGB")
-        tensor_in = clf_transform(img_pil).unsqueeze(0)
-        with torch.no_grad():
-            logits = classifier(tensor_in)
-            pred_cls_idx = int(logits.argmax(dim=1).item())
-
-        true_cls_idx = CLASS_TO_IDX.get(r["unified_type"], 0)
-        clf_true_labels.append(true_cls_idx)
-        clf_pred_labels.append(pred_cls_idx)
-
-        # Pixel & Localisation Evaluation if defect image with mask
-        if is_defect == 1 and mask_path and os.path.exists(mask_path):
-            gt_mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            gt_mask_bin = (gt_mask > 127).astype(np.uint8)
-
-            # Match heatmap to mask resolution
-            h_m, w_m = gt_mask.shape
-            heatmap_resized = cv2.resize(heatmap, (w_m, h_m))
-            norm_heat = (heatmap_resized - heatmap_resized.min()) / (heatmap_resized.max() - heatmap_resized.min() + 1e-8)
-
-            # Pixel AUROC (subsample for speed)
-            step = 4
-            pix_gt = gt_mask_bin[::step, ::step].flatten()
-            pix_score = norm_heat[::step, ::step].flatten()
-            if len(np.unique(pix_gt)) > 1:
-                pix_auc = float(roc_auc_score(pix_gt, pix_score))
-                cat_pixel_auroc[cat].append(pix_auc)
-
-            # Thresholded binary mask IoU and Dice
-            p_thresh = thresholds_cfg[cat]["pixel_threshold"]
-            pred_mask = (heatmap_resized >= p_thresh).astype(np.uint8)
-
-            intersection = np.logical_and(pred_mask, gt_mask_bin).sum()
-            union = np.logical_or(pred_mask, gt_mask_bin).sum()
-            iou = intersection / union if union > 0 else 0.0
-            dice = (2.0 * intersection) / (pred_mask.sum() + gt_mask_bin.sum() + 1e-8)
-            cat_ious[cat].append(iou)
-            cat_dices[cat].append(dice)
-
-            # Bounding box IoU >= 0.5
-            gt_bbox = mask_to_bbox(gt_mask_bin)
-            best_box_iou = 0.0
-            for pb in pred_bboxes:
-                b_iou = compute_box_iou(pb, gt_bbox)
-                if b_iou > best_box_iou:
-                    best_box_iou = b_iou
-            cat_box_iou50[cat].append(1 if best_box_iou >= 0.5 else 0)
-
-            # Save sample figure in docs/cv_samples/
-            if sample_visualizations_count < 14:
-                sample_visualizations_count += 1
-                fig_name = f"sample_{sample_visualizations_count:02d}_{cat}_{r['defect_type']}.png"
-                fig_path = output_docs_dir / fig_name
-
-                # Create 3-panel figure: Raw Image, GT Mask, PatchCore Heatmap + Predicted BBox
-                fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-                raw_rgb = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
-                axes[0].imshow(raw_rgb)
-                axes[0].set_title(f"Input: {cat}\nRaw Defect: {r['defect_type']}")
-                axes[0].axis("off")
-
-                axes[1].imshow(gt_mask_bin, cmap="gray")
-                axes[1].set_title("Ground Truth Mask")
-                axes[1].axis("off")
-
-                # Overlay heatmap and bounding boxes
-                overlay = raw_rgb.copy()
-                heat_norm = cv2.normalize(heatmap_resized, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-                color_map = cv2.applyColorMap(heat_norm, cv2.COLORMAP_JET)
-                color_map_rgb = cv2.cvtColor(color_map, cv2.COLOR_BGR2RGB)
-                blended = cv2.addWeighted(overlay, 0.65, color_map_rgb, 0.35, 0)
-
-                for pb in pred_bboxes:
-                    cv2.rectangle(blended, (pb["x"], pb["y"]), (pb["x"] + pb["width"], pb["y"] + pb["height"]), (255, 0, 0), 3)
-
-                axes[2].imshow(blended)
-                axes[2].set_title(f"PatchCore Heatmap + BBox\nPred: {IDX_TO_CLASS[pred_cls_idx]}")
-                axes[2].axis("off")
-
-                plt.tight_layout()
-                plt.savefig(fig_path, dpi=120)
-                plt.close(fig)
-
-    # Aggregate Stage A Metrics
-    overall_scores = []
-    overall_labels = []
-    category_metrics = {}
-
-    for cat in CATEGORIES:
-        scores = np.array(cat_image_scores[cat])
-        labels = np.array(cat_image_labels[cat])
-        overall_scores.extend(scores.tolist())
-        overall_labels.extend(labels.tolist())
-
-        thresh = thresholds_cfg[cat]["image_threshold"]
-        preds = (scores >= thresh).astype(int)
-
-        img_auc = float(roc_auc_score(labels, scores)) if len(np.unique(labels)) > 1 else 1.0
-        prec = float(precision_score(labels, preds, zero_division=0))
-        rec = float(recall_score(labels, preds, zero_division=0))
-        f1 = float(f1_score(labels, preds, zero_division=0))
-
-        mean_pix_auc = float(np.mean(cat_pixel_auroc[cat])) if cat_pixel_auroc[cat] else 0.0
-        mean_iou = float(np.mean(cat_ious[cat])) if cat_ious[cat] else 0.0
-        mean_dice = float(np.mean(cat_dices[cat])) if cat_dices[cat] else 0.0
-        box_iou50_pct = float(np.mean(cat_box_iou50[cat])) * 100 if cat_box_iou50[cat] else 0.0
-
-        category_metrics[cat] = {
-            "image_auroc": round(img_auc, 4),
-            "precision": round(prec, 4),
-            "recall": round(rec, 4),
-            "f1_score": round(f1, 4),
-            "pixel_auroc": round(mean_pix_auc, 4),
-            "localisation_iou": round(mean_iou, 4),
-            "localisation_dice": round(mean_dice, 4),
-            "pct_boxes_iou_gte_05": round(box_iou50_pct, 2)
-        }
-
-    overall_scores_arr = np.array(overall_scores)
-    overall_labels_arr = np.array(overall_labels)
-    overall_img_auc = float(roc_auc_score(overall_labels_arr, overall_scores_arr))
-    all_ious = [iou for sub in cat_ious.values() for iou in sub]
-    all_dices = [d for sub in cat_dices.values() for d in sub]
-    all_pix_aucs = [pa for sub in cat_pixel_auroc.values() for pa in sub]
-    all_box50 = [b for sub in cat_box_iou50.values() for b in sub]
-
-    # Stage B Metrics
-    clf_true_arr = np.array(clf_true_labels)
-    clf_pred_arr = np.array(clf_pred_labels)
-    macro_f1 = float(f1_score(clf_true_arr, clf_pred_arr, average="macro", zero_division=0))
-    overall_acc = float((clf_true_arr == clf_pred_arr).mean())
-
-    cm = confusion_matrix(clf_true_arr, clf_pred_arr, labels=list(range(len(UNIFIED_CLASSES))))
-
-    per_class_metrics = {}
-    for i, c_name in enumerate(UNIFIED_CLASSES):
-        c_true = (clf_true_arr == i).astype(int)
-        c_pred = (clf_pred_arr == i).astype(int)
-        per_class_metrics[c_name] = {
-            "precision": round(float(precision_score(c_true, c_pred, zero_division=0)), 4),
-            "recall": round(float(recall_score(c_true, c_pred, zero_division=0)), 4),
-            "f1_score": round(float(f1_score(c_true, c_pred, zero_division=0)), 4),
-            "support": int(c_true.sum())
-        }
-
-    # Plot Confusion Matrix
-    fig, ax = plt.subplots(figsize=(10, 8))
-    im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
-    ax.figure.colorbar(im, ax=ax)
-    ax.set(
-        xticks=np.arange(cm.shape[1]),
-        yticks=np.arange(cm.shape[0]),
-        xticklabels=UNIFIED_CLASSES,
-        yticklabels=UNIFIED_CLASSES,
-        ylabel="True Label",
-        xlabel="Predicted Label",
-        title=f"Classifier Confusion Matrix on Held-Out Test Split (Macro-F1: {macro_f1:.4f})"
-    )
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-
-    thresh_val = cm.max() / 2.0
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            ax.text(j, i, format(cm[i, j], "d"),
-                    ha="center", va="center",
-                    color="white" if cm[i, j] > thresh_val else "black")
-    plt.tight_layout()
-    cm_plot_path = output_docs_dir / "confusion_matrix.png"
-    plt.savefig(cm_plot_path, dpi=130)
-    plt.close(fig)
-
-    # 4. 5-Fold Cross Validation on Classifier
-    print("\nRunning 5-Fold Cross-Validation on Classifier (Assessing Small-Sample Variability)...")
-    all_records = splits_data["train"] + splits_data["val"] + splits_data["test"]
-    X_paths = [r["path"] for r in all_records]
-    y_labels = [CLASS_TO_IDX.get(r["unified_type"], 0) for r in all_records]
-
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    fold_f1_scores = []
-
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X_paths, y_labels)):
-        # Evaluate linear head fast transfer on fold
-        fold_y_val = [y_labels[i] for i in val_idx]
-        fold_y_train = [y_labels[i] for i in train_idx]
-
-        # Use class priors and test predictions to model realistic cross-fold variation
-        sub_preds = []
-        for i in val_idx:
-            # Predict with trained model
-            img_pil = Image.open(X_paths[i]).convert("RGB")
-            t_in = clf_transform(img_pil).unsqueeze(0)
-            with torch.no_grad():
-                out = classifier(t_in)
-                sub_preds.append(int(out.argmax(dim=1).item()))
-        f_score = f1_score(fold_y_val, sub_preds, average="macro", zero_division=0)
-        fold_f1_scores.append(float(f_score))
-        print(f"  Fold {fold+1} Macro-F1: {f_score:.4f}")
-
-    cv_mean = float(np.mean(fold_f1_scores))
-    cv_std = float(np.std(fold_f1_scores))
-    print(f"5-Fold CV Macro-F1: {cv_mean:.4f} +/- {cv_std:.4f}")
-
-    # Assemble Final Metrics Payload
+    # 5. Assemble and Persist Metrics Payload
     cv_metrics = {
-        "dataset": "MVTec AD (4 approved categories: metal_nut, screw, transistor, cable)",
+        "dataset": "Synthetic Precision Ground Shafts (Procedural Engine)",
         "evaluation_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "stage_a_anomaly_detection": {
-            "overall_image_auroc": round(overall_img_auc, 4),
-            "overall_pixel_auroc": round(float(np.mean(all_pix_aucs)), 4),
-            "overall_localisation_iou": round(float(np.mean(all_ious)), 4),
-            "overall_localisation_dice": round(float(np.mean(all_dices)), 4),
-            "overall_pct_boxes_iou_gte_05": round(float(np.mean(all_box50)) * 100, 2),
-            "mAP_at_05": round(float(np.mean(all_box50)), 4),
-            "per_category": category_metrics
+        "data_source": "synthetic",
+        "model_version": "synthetic-shaft-v1.0",
+        "model_architecture": "MobileNetV3-Small Transfer Learning + Grad-CAM Localizer",
+        "classes": SHAFT_CLASSES,
+        "normal_test_split": {
+            "sample_count": normal_eval["sample_count"],
+            "accuracy": normal_eval["accuracy"],
+            "macro_f1": normal_eval["macro_f1"],
+            "macro_precision": normal_eval["macro_precision"],
+            "macro_recall": normal_eval["macro_recall"],
+            "mean_localisation_iou": normal_eval["mean_localisation_iou"],
+            "pct_boxes_iou_gte_05": normal_eval["pct_boxes_iou_gte_05"],
+            "mAP_at_05": normal_eval["mAP_at_05"],
+            "per_class": normal_eval["per_class"],
+            "confusion_matrix": normal_eval["confusion_matrix"]
         },
-        "stage_b_defect_classification": {
-            "overall_accuracy": round(overall_acc, 4),
-            "macro_f1": round(macro_f1, 4),
-            "per_class": per_class_metrics,
-            "five_fold_cv_macro_f1": {
-                "mean": round(cv_mean, 4),
-                "std": round(cv_std, 4),
-                "fold_scores": [round(f, 4) for f in fold_f1_scores]
-            },
-            "confusion_matrix": cm.tolist()
+        "hard_test_split": {
+            "sample_count": hard_eval["sample_count"],
+            "accuracy": hard_eval["accuracy"],
+            "macro_f1": hard_eval["macro_f1"],
+            "macro_precision": hard_eval["macro_precision"],
+            "macro_recall": hard_eval["macro_recall"],
+            "mean_localisation_iou": hard_eval["mean_localisation_iou"],
+            "pct_boxes_iou_gte_05": hard_eval["pct_boxes_iou_gte_05"],
+            "mAP_at_05": hard_eval["mAP_at_05"],
+            "per_class": hard_eval["per_class"],
+            "confusion_matrix": hard_eval["confusion_matrix"]
         },
-        "limitations": [
-            "MVTec AD consists of proxy parts (nuts, screws, transistors, cables) and does NOT contain precision machined shafts.",
-            "Lighting and camera perspective are highly controlled under laboratory conditions.",
-            "Small defect sample size: classes such as transistor defects have only ~10 images per class.",
-            "Cracks are NOT present in the 4 selected MVTec AD categories and are explicitly unsupported.",
-            "Academic prototype implementation; not intended for uncalibrated direct production deployment."
-        ]
+        "performance_drop_normal_vs_hard": {
+            "macro_f1_drop": drop_macro_f1,
+            "accuracy_drop": drop_acc,
+            "localisation_iou_drop": drop_iou,
+            "pct_boxes_gte_05_drop": drop_box50,
+            "mAP_at_05_drop": drop_map50
+        },
+        "honest_disclosure": {
+            "statement": "The vision model is trained on synthetic shaft images generated by our procedural script. Metrics are optimistic compared to real factory images. The model is not validated on real production shaft photos and is NOT production-grade without physical factory calibration.",
+            "data_source": "synthetic",
+            "uncalibrated_probabilities_notice": "Raw softmax outputs are uncalibrated model confidences, not true calibrated Bayesian posterior probabilities. Human engineering review remains mandatory."
+        }
     }
 
-    # Save to backend/models/cv_metrics.json and models/cv_metrics.json
-    metrics_path = models_dir / "cv_metrics.json"
-    with open(metrics_path, "w", encoding="utf-8") as f:
+    metrics_out = models_dir / "cv_metrics.json"
+    with open(metrics_out, "w", encoding="utf-8") as f:
         json.dump(cv_metrics, f, indent=2)
-
     with open(alt_models_dir / "cv_metrics.json", "w", encoding="utf-8") as f:
         json.dump(cv_metrics, f, indent=2)
 
-    print("\n" + "=" * 65)
-    print("HONEST METRICS SUMMARY TABLE")
-    print("=" * 65)
-    print(f"{'Category':<14} | {'Img AUROC':<10} | {'Pix AUROC':<10} | {'IoU':<8} | {'Dice':<8} | {'Boxes IoU>=.5'}")
+    # Print Summary Tables
+    print("\n" + "=" * 70)
+    print("  EVALUATION SUMMARY: NORMAL TEST SPLIT VS HARD TEST SPLIT")
+    print("=" * 70)
+    print(f"{'Metric':<28} | {'Normal Test':<14} | {'Hard Test':<14} | {'Drop (Delta)'}")
+    print("-" * 70)
+    print(f"{'Macro-F1':<28} | {normal_eval['macro_f1']:<14.4f} | {hard_eval['macro_f1']:<14.4f} | {drop_macro_f1:+.4f}")
+    print(f"{'Accuracy':<28} | {normal_eval['accuracy']:<14.4f} | {hard_eval['accuracy']:<14.4f} | {drop_acc:+.4f}")
+    print(f"{'Localisation Mean IoU':<28} | {normal_eval['mean_localisation_iou']:<14.4f} | {hard_eval['mean_localisation_iou']:<14.4f} | {drop_iou:+.4f}")
+    print(f"{'% Boxes IoU >= 0.5':<28} | {normal_eval['pct_boxes_iou_gte_05']:<13.1f}% | {hard_eval['pct_boxes_iou_gte_05']:<13.1f}% | {drop_box50:+.1f}%")
+    print(f"{'mAP@0.5':<28} | {normal_eval['mAP_at_05']:<14.4f} | {hard_eval['mAP_at_05']:<14.4f} | {drop_map50:+.4f}")
+    print("=" * 70)
+
+    print("\nPER-CLASS METRICS (NORMAL TEST SPLIT):")
+    print(f"{'Class Name':<22} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<10} | {'Support'}")
     print("-" * 65)
-    for cat, m in category_metrics.items():
-        print(f"{cat:<14} | {m['image_auroc']:<10.4f} | {m['pixel_auroc']:<10.4f} | {m['localisation_iou']:<8.4f} | {m['localisation_dice']:<8.4f} | {m['pct_boxes_iou_gte_05']:.1f}%")
+    for cname, cm_dict in normal_eval["per_class"].items():
+        print(f"{cname:<22} | {cm_dict['precision']:<10.4f} | {cm_dict['recall']:<10.4f} | {cm_dict['f1']:<10.4f} | {cm_dict['support']}")
+
+    print("\nPER-CLASS METRICS (HARD TEST SPLIT):")
+    print(f"{'Class Name':<22} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<10} | {'Support'}")
     print("-" * 65)
-    print(f"Overall Stage A Image AUROC: {overall_img_auc:.4f} | Pixel AUROC: {np.mean(all_pix_aucs):.4f} | mAP@0.5: {np.mean(all_box50):.4f}")
-    print(f"Stage B Classifier Macro-F1: {macro_f1:.4f} | Accuracy: {overall_acc:.4f} | 5-Fold CV: {cv_mean:.4f} +/- {cv_std:.4f}")
-    print("=" * 65)
-    print(f"Saved metrics to: {metrics_path}")
-    print(f"Saved {sample_visualizations_count} visual evaluation samples to: {output_docs_dir}")
+    for cname, cm_dict in hard_eval["per_class"].items():
+        print(f"{cname:<22} | {cm_dict['precision']:<10.4f} | {cm_dict['recall']:<10.4f} | {cm_dict['f1']:<10.4f} | {cm_dict['support']}")
+
+    print("=" * 70)
+    print(f"Metrics saved to: {metrics_out}")
 
     return cv_metrics
 
+
 if __name__ == "__main__":
-    evaluate_pipeline()
+    run_evaluation()

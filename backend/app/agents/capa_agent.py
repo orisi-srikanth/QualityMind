@@ -21,7 +21,8 @@ class CorrectivePreventiveActionAgent(BaseQualityAgent):
         self,
         incident_id: str = "INC-2026-088",
         batch_id: str = "BATCH-0245",
-        machine: str = "CNC-04"
+        machine: str = "CNC-04",
+        rca_report: Optional[Any] = None
     ) -> Dict[str, Any]:
         start = time.time()
         tool_calls = [

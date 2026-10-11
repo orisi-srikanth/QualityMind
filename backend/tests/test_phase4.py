@@ -18,22 +18,60 @@ def test_cv_inference_scratch_detection():
     res = vision_inference.predict(sample_path, image_id="IMG-001", output_dir=out_dir)
 
     assert res["image_id"] == "IMG-001"
-    assert res["source"] == "MVTec AD (proxy part)"
+    assert res["data_source"] == "synthetic"
     assert res["defect_detected"] is True
-    assert res["category"] == "metal_nut"
-    assert res["confidence"] > 0.0
+    assert res["defect_type"] == "surface_scratch"
+    assert res["confidence"] >= 0.70
     assert res["bbox"] is not None
     assert res["label"] == EpistemicLabel.MODEL_PREDICTION.value
 
 def test_cv_inference_normal_conforming():
     sample_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "app", "static", "uploads", "samples", "metal_nut_normal.png")
+        os.path.join(os.path.dirname(__file__), "..", "app", "static", "uploads", "samples", "shaft_normal.png")
     )
+    if not os.path.exists(sample_path):
+        sample_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "app", "static", "uploads", "samples", "metal_nut_normal.png")
+        )
     assert os.path.exists(sample_path), f"Sample normal image must exist at {sample_path}"
     res = vision_inference.predict(sample_path, image_id="IMG-TEST-02")
-    assert res["source"] == "MVTec AD (proxy part)"
-    assert res["category"] == "metal_nut"
+    assert res["data_source"] in ["synthetic", "real_proxy"]
     assert res["label"] == EpistemicLabel.MODEL_PREDICTION.value
+
+def test_no_leakage_between_splits():
+    """Verify strictly zero SHA-256 and pHash leakage across train, val, test, and hard test splits."""
+    from ml.cv.make_splits import verify_shaft_splits
+    stats = verify_shaft_splits()
+    assert stats["sha256_overlap_count"] == 0, "SHA-256 overlap must be strictly 0"
+    assert stats["phash_overlap_count"] == 0, "Perceptual hash overlap must be strictly 0"
+    assert stats["train_count"] == 1764
+    assert stats["val_count"] == 378
+    assert stats["test_count"] == 378
+    assert stats["hard_test_count"] == 300
+
+def test_cv_hard_split_performance_drop():
+    """Verify evaluation records Macro-F1 drop between normal and hard test splits."""
+    import json
+    metrics_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models", "cv_metrics.json"))
+    assert os.path.exists(metrics_path), "cv_metrics.json must exist"
+    with open(metrics_path, "r", encoding="utf-8") as f:
+        metrics = json.load(f)
+    
+    drop = metrics["performance_drop_normal_vs_hard"]
+    assert drop["macro_f1_drop"] > 0.40, "Expected significant Macro-F1 drop under unseen severe corruptions"
+    assert drop["accuracy_drop"] > 0.40, "Expected significant accuracy drop under unseen severe corruptions"
+    assert metrics["normal_test_split"]["macro_f1"] > 0.90, "Normal test Macro-F1 must be > 0.90"
+
+def test_cv_honest_disclosure_payload():
+    """Verify vision inspection response carries data_source: 'synthetic' and honest disclosure."""
+    sample_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "app", "static", "uploads", "samples", "IMG-001.png")
+    )
+    res = vision_inference.predict(sample_path, image_id="IMG-001")
+    assert res.get("data_source") == "synthetic"
+    assert "metrics" in res
+    assert res["metrics"].get("uncalibrated_probability") is True
+
 
 def test_anomaly_detector_anchor_telemetry():
     telemetry = [

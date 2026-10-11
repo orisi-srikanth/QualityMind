@@ -113,6 +113,9 @@ class QualityKnowledgeAgent:
         # Default directories to search
         search_dirs = [
             self.docs_directory,
+            os.path.join(settings.DATA_DIR, "knowledge_docs"),
+            os.path.join(settings.DATA_DIR, "kb"),
+            settings.DATA_DIR,
             os.path.join(settings.BASE_DIR, "data"),
             os.path.join(settings.BASE_DIR, "backend", "data"),
             os.path.join(settings.BASE_DIR, "backend", "data", "kb")
@@ -120,10 +123,13 @@ class QualityKnowledgeAgent:
         
         found = []
         valid_exts = {".csv", ".json", ".txt", ".md", ".pdf"}
+        ignored_names = {"vector_kb.json", "splits.json", "historical_ncrs.csv"}
 
         for d in search_dirs:
             if os.path.exists(d):
                 for item in os.listdir(d):
+                    if item in ignored_names:
+                        continue
                     full_p = os.path.join(d, item)
                     if os.path.isfile(full_p):
                         _, ext = os.path.splitext(item)
@@ -198,6 +204,18 @@ class QualityKnowledgeAgent:
                     summary["per_file_status"][fname] = {"status": "SKIPPED_EMPTY", "chunks": 0}
                     continue
 
+                # Purge orphan chunks for this file
+                try:
+                    existing_file_records = self.collection.get(where={"file_name": fname})
+                    if existing_file_records and existing_file_records["ids"]:
+                        current_ids_set = set(r["id"] for r in records)
+                        orphans = [oid for oid in existing_file_records["ids"] if oid not in current_ids_set]
+                        if orphans:
+                            self.collection.delete(ids=orphans)
+                            summary["chunks_deleted"] += len(orphans)
+                except Exception:
+                    pass
+
                 chunks_to_upsert = []
                 ids_to_upsert = []
                 metas_to_upsert = []
@@ -249,12 +267,83 @@ class QualityKnowledgeAgent:
                 summary["errors"].append(err_msg)
                 summary["per_file_status"][fname] = {"status": "ERROR", "error": str(e)}
 
+        # Synchronize SQL tables (kb_documents, historical_incidents)
+        self._sync_sql_tables()
+
         self.last_ingestion_info = {
             "timestamp": now_iso,
             "total_chunks_in_collection": self.collection.count(),
             "summary": summary
         }
         return summary
+
+    def _sync_sql_tables(self):
+        """Synchronizes SQL tables (kb_documents, historical_incidents) to match vector store contents exactly."""
+        try:
+            from backend.app.database.session import SessionLocal
+            from backend.app.database.models import KBDocument, HistoricalIncident
+            db = SessionLocal()
+            try:
+                # 1. Sync HistoricalIncident with historical NCRs
+                ncr_path = os.path.join(settings.DATA_DIR, "historical_ncrs.json")
+                if not os.path.exists(ncr_path):
+                    ncr_path = os.path.join(settings.BASE_DIR, "backend", "data", "historical_ncrs.json")
+                if os.path.exists(ncr_path):
+                    with open(ncr_path, "r", encoding="utf-8") as f:
+                        ncrs = json.load(f)
+                    for n in ncrs:
+                        nid = n.get("id") or n.get("ncr_id")
+                        if not nid:
+                            continue
+                        existing = db.query(HistoricalIncident).filter_by(ncr_id=nid).first()
+                        if not existing:
+                            db.add(HistoricalIncident(
+                                ncr_id=nid,
+                                title=n.get("title", f"Nonconformance {nid}"),
+                                defect_type=n.get("defect_type", ""),
+                                part_number=n.get("part_number", ""),
+                                machine=n.get("machine", ""),
+                                description=n.get("description", ""),
+                                confirmed_root_cause=n.get("confirmed_root_cause", ""),
+                                resolution=n.get("resolution", n.get("action_taken", "")),
+                                date=n.get("date", "2026-03-14")
+                            ))
+                        else:
+                            existing.title = n.get("title", existing.title)
+                            existing.defect_type = n.get("defect_type", existing.defect_type)
+                            existing.part_number = n.get("part_number", existing.part_number)
+                            existing.machine = n.get("machine", existing.machine)
+                            existing.description = n.get("description", existing.description)
+                            existing.confirmed_root_cause = n.get("confirmed_root_cause", existing.confirmed_root_cause)
+                            existing.resolution = n.get("resolution", existing.resolution)
+                    db.commit()
+
+                # 2. Sync KBDocument with indexed vector store chunks
+                col_data = self.collection.get(include=["metadatas"])
+                file_stats = {}
+                for m in (col_data.get("metadatas") or []):
+                    fn = m.get("file_name", "unknown")
+                    dt = m.get("doc_type", "kb")
+                    if fn not in file_stats:
+                        file_stats[fn] = {"count": 0, "doc_type": dt}
+                    file_stats[fn]["count"] += 1
+
+                db.query(KBDocument).delete()
+                for fn, stat in file_stats.items():
+                    title_clean = fn.replace("_", " ").replace(".csv", "").replace(".json", "").replace(".md", "").replace(".pdf", "").replace(".txt", "")
+                    db.add(KBDocument(
+                        doc_type=stat["doc_type"],
+                        title=title_clean,
+                        source_file=fn,
+                        chunks_count=stat["count"]
+                    ))
+                db.commit()
+            except Exception:
+                db.rollback()
+            finally:
+                db.close()
+        except Exception:
+            pass
 
     def _extract_records_from_file(self, fpath: str, ext: str) -> Tuple[List[Dict[str, Any]], List[str]]:
         """Parses source file and extracts records with source metadata."""
@@ -271,7 +360,7 @@ class QualityKnowledgeAgent:
         filters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Performs semantic retrieval with metadata filtering, accurate distance reporting,
+        Performs hybrid semantic retrieval with metadata filtering, accurate distance reporting,
         and deterministic or grounded LLM answer generation.
         """
         q_clean = query_text.strip() if query_text else ""
@@ -305,10 +394,11 @@ class QualityKnowledgeAgent:
                 if k in valid_keys and v is not None and str(v).strip():
                     where_filter[k] = str(v).strip()
 
-        # Chroma query
+        # Chroma query with candidate pool for hybrid ranking
+        candidate_k = max(top_k * 4, 25)
         query_params = {
             "query_texts": [q_clean],
-            "n_results": top_k,
+            "n_results": min(self.collection.count(), candidate_k),
             "include": ["documents", "metadatas", "distances"]
         }
         if where_filter:
@@ -327,6 +417,8 @@ class QualityKnowledgeAgent:
 
         matches: List[Dict[str, Any]] = []
         sources: List[str] = []
+        candidates: List[Dict[str, Any]] = []
+        q_tokens = set(re.findall(r"\w+", q_clean.lower()))
 
         if res and res["documents"] and res["documents"][0]:
             docs = res["documents"][0]
@@ -334,32 +426,98 @@ class QualityKnowledgeAgent:
             dists = res["distances"][0] if res["distances"] else [0.0] * len(docs)
             ids = res["ids"][0] if res["ids"] else [f"doc-{i}" for i in range(len(docs))]
 
-            for rank, (doc_id, text, meta, dist) in enumerate(zip(ids, docs, metas, dists), start=1):
-                # In cosine space, distance d in [0, 2]. Similarity is 1 - d/2.
+            for doc_id, text, meta, dist in zip(ids, docs, metas, dists):
                 dist_val = float(dist)
                 sim_score = max(0.0, round(1.0 - (dist_val / 2.0), 4))
-                
-                src_file = meta.get("file_name", "unknown")
-                rec_id = meta.get("record_id")
-                category = meta.get("category", "general")
 
-                citation_name = f"{src_file}:{rec_id}" if rec_id else src_file
-                if citation_name not in sources:
-                    sources.append(citation_name)
+                searchable_text = (
+                    text + " " +
+                    str(meta.get("defect_type", "")) + " " +
+                    str(meta.get("title", "")) + " " +
+                    str(meta.get("record_id", ""))
+                ).lower()
+                text_tokens = set(re.findall(r"\w+", searchable_text))
+                token_overlap = len(q_tokens & text_tokens) / max(len(q_tokens), 1)
 
-                matches.append({
+                phrase_boost = 1.0
+                if q_clean.lower() in searchable_text:
+                    phrase_boost = 1.30
+                elif any(word in str(meta.get("defect_type", "")).lower() for word in q_tokens if len(word) > 3):
+                    phrase_boost = 1.15
+
+                hybrid_sim = min(0.999, round((0.60 * sim_score + 0.40 * token_overlap) * phrase_boost, 4))
+                candidates.append({
                     "id": doc_id,
                     "text": text,
-                    "source_file": src_file,
-                    "record_id": rec_id,
-                    "category": category,
-                    "metadata": meta,
-                    "chunk_index": meta.get("chunk_index", 0),
-                    "distance": round(dist_val, 4),
-                    "similarity_score": sim_score,
-                    "distance_metric": "cosine_distance",
-                    "rank": rank
+                    "meta": meta,
+                    "dist": dist_val,
+                    "sim_score": sim_score,
+                    "hybrid_sim": hybrid_sim,
+                    "token_overlap": token_overlap
                 })
+
+        # Rank candidates by hybrid similarity
+        candidates.sort(key=lambda x: x["hybrid_sim"], reverse=True)
+
+        # Check out-of-domain similarity floor (Check 5)
+        # In manufacturing quality RAG, genuine matches have either high cosine similarity (>0.70)
+        # or relevant domain terminology overlap (>=0.20). Out-of-domain queries lack both.
+        SIMILARITY_FLOOR = 0.65
+        llm_mode = getattr(settings, "LLM_PROVIDER", "none").lower()
+        llm_active = universal_llm.is_enabled() if hasattr(universal_llm, "is_enabled") else (llm_mode != "none")
+
+        is_out_of_domain = False
+        if not candidates:
+            is_out_of_domain = True
+        else:
+            top_cand = candidates[0]
+            if top_cand["sim_score"] < SIMILARITY_FLOOR and top_cand["token_overlap"] < 0.20:
+                is_out_of_domain = True
+            elif top_cand["hybrid_sim"] < 0.50:
+                is_out_of_domain = True
+
+        if is_out_of_domain:
+            return {
+                "query": q_clean,
+                "answer": "No relevant manufacturing quality documents or records were found matching the query.",
+                "answer_mode": "no_relevant_incidents_below_similarity_floor",
+                "llm_enabled": llm_active,
+                "results_count": 0,
+                "matches": [],
+                "sources": [],
+                "distance_metric": "cosine_distance",
+                "similarity_floor": SIMILARITY_FLOOR,
+                "warnings": ["Top match similarity fell below confidence floor (0.65) and domain overlap threshold. Query classified as out-of-domain."]
+            }
+
+        for rank, c in enumerate(candidates[:top_k], start=1):
+            meta = c["meta"]
+            src_file = meta.get("file_name", "unknown")
+            rec_id = meta.get("record_id")
+            category = meta.get("category", "general")
+
+            citation_name = f"{src_file}:{rec_id}" if rec_id else src_file
+            if citation_name not in sources:
+                sources.append(citation_name)
+
+            matches.append({
+                "id": c["id"],
+                "text": c["text"],
+                "source_file": src_file,
+                "record_id": rec_id,
+                "category": category,
+                "metadata": meta,
+                "chunk_index": meta.get("chunk_index", 0),
+                "distance": round(c["dist"], 4),
+                "similarity_score": c["hybrid_sim"],
+                "dense_cosine_similarity": c["sim_score"],
+                "distance_metric": "cosine_distance",
+                "rank": rank,
+                "context_notice": (
+                    f"Historical context only (Cosine Similarity: {c['sim_score']:.3f}, Hybrid: {c['hybrid_sim']:.3f}). "
+                    f"Does NOT prove or establish causation for current production batch."
+                )
+            })
 
         # Generate Grounded Answer based on LLM configuration mode
         llm_mode = getattr(settings, "LLM_PROVIDER", "none").lower()

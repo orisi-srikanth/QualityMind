@@ -303,17 +303,17 @@ def test_pareto_vital_few_and_date_filtering():
 def test_two_proportion_effectiveness_from_real_db_rows():
     """
     Verifies that evaluate_capa_effectiveness loads pre/post batch measurements
-    from SQLite database (500 pre with 41 nonconforming = 8.2% vs 500 post with 6 = 1.2%),
-    and verifies the two-sample z-test, p-value < 1e-6, and epistemic wording.
+    from SQLite database (1000 pre with 82 nonconforming = 8.2% vs 1000 post with 11 = 1.1%),
+    and verifies the two-sample z-test (z = 7.54, p-value < 1e-6), and epistemic wording.
     """
     eff = effectiveness_engine.evaluate_capa_effectiveness("CAPA-2026-001")
-    assert eff["sample_before_count"] == 500
-    assert eff["defects_before_count"] == 41
+    assert eff["sample_before_count"] == 1000
+    assert eff["defects_before_count"] == 82
     assert eff["rejection_rate_before_percent"] == 8.2
-    assert eff["sample_after_count"] == 500
-    assert eff["defects_after_count"] == 6
-    assert eff["rejection_rate_after_percent"] == 1.2
-    assert eff["z_statistic"] == 5.23
+    assert eff["sample_after_count"] == 1000
+    assert eff["defects_after_count"] == 11
+    assert eff["rejection_rate_after_percent"] == 1.1
+    assert eff["z_statistic"] == 7.54
     assert eff["is_statistically_significant"] is True
     assert "Observed association" in eff["conclusion_label"]
     assert "causation not established" in eff["conclusion_label"]

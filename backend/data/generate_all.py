@@ -412,21 +412,35 @@ def generate_manufacturing_data():
         # Generate telemetry for batch
         for t_min in range(30):
             t_stamp = (b_date + timedelta(minutes=t_min * 6)).strftime("%Y-%m-%d %H:%M:%S")
+            spindle = 1200.0
+            feed = 0.20
+            coolant = round(24.0 + np.random.normal(0, 0.15), 1)
+            vib = round(2.1 + np.random.normal(0, 0.04), 2)
+            motor = 14.5
+
             if sc == "SUDDEN_VIBRATION" and t_min >= 15:
                 vib = round(3.8 + np.random.normal(0, 0.08), 2)
-            else:
-                vib = round(2.1 + np.random.normal(0, 0.05), 2)
+            elif sc == "GRADUAL_DRIFT" and t_min >= 15:
+                coolant = round(24.0 + ((t_min - 14) * 0.22) + np.random.normal(0, 0.04), 1)
+                vib = round(2.1 + ((t_min - 14) * 0.04) + np.random.normal(0, 0.02), 2)
+            elif sc == "MULTIVARIATE_ANOMALY" and t_min >= 15:
+                # Unusual parameter combination: high feed (0.23 mm/rev), low spindle speed (1160 RPM), high motor current (17.8 A), vibration 2.45 mm/s.
+                # Individually, each is strictly within operational limits ([0.15..0.25], [1100..1300], [13.0..22.0], [2.1..3.5])
+                feed = 0.23
+                spindle = 1160.0
+                motor = 17.8
+                vib = 2.45
 
             telemetry_data.append({
                 "machine_id": mach_id,
                 "batch_id": b_num,
                 "ts": t_stamp,
-                "spindle_speed": 1200.0,
-                "feed_rate": 0.20,
-                "coolant_temp": round(24.0 + np.random.normal(0, 0.2), 1),
+                "spindle_speed": spindle,
+                "feed_rate": feed,
+                "coolant_temp": coolant,
                 "vibration": vib,
                 "tool_usage_cycles": 600 + (t_min * 10),
-                "motor_current": 14.5,
+                "motor_current": motor,
                 "cycle_time": 45.0,
                 "pressure": 5.5
             })

@@ -33,6 +33,47 @@ class QualityReviewerCriticAgent(BaseQualityAgent):
                 return match.group(0)
         return None
 
+    def scan_forbidden_autonomous_actions(self, text: str) -> Optional[str]:
+        """Scans CAPA proposals for forbidden autonomous machine actuation or batch disposition."""
+        patterns = [
+            r"\b(e-?stop|emergency\s+stop)\b",
+            r"\b(stop|halt|shut\s*down)\s+(the\s+)?(machine|spindle|line|lathe|mill|production|feed)\b",
+            r"\b(change|modify|override|set|update|write|alter)\s+(the\s+)?(cnc|plc|ladder|register|offset|parameter|g-?code|m-?code)\b",
+            r"\b(adjust|reset)\s+(the\s+)?(machine\s+offset|spindle\s+speed)\s+directly\b",
+            r"\b(auto-?release|automatically\s+release|system\s+release)\s+(batch|product|lot)?\b",
+            r"\b(auto-?scrap|automatically\s+scrap|auto-?reject|automatically\s+reject)\s+(batch|parts|lot)?\b",
+            r"\b(override|bypass)\s+quality\s+hold\b",
+            r"\bautonomous(ly)?\s+(execute|actuate|control|change|stop|release|scrap)\b",
+            r"\bexecute\s+g-?code\b"
+        ]
+        for pat in patterns:
+            match = re.search(pat, text, re.IGNORECASE)
+            if match:
+                return match.group(0)
+        return None
+
+    def audit_capa_safety(self, action_description: str) -> Dict[str, Any]:
+        """Fault-injection audit method to test Critic Agent detection of forbidden autonomous actions."""
+        violation = self.scan_forbidden_autonomous_actions(action_description)
+        if violation:
+            return {
+                "verdict": "REASSESS",
+                "is_safe": False,
+                "violation_detected": violation,
+                "comment": (
+                    f"CRITIC SAFETY VIOLATION: Forbidden autonomous machine action detected in proposal: '{violation}'. "
+                    f"QualityMind operates strictly as human decision support (IATF 16949). "
+                    f"System cannot stop machinery, alter PLC/CNC parameters, or autonomously dispose product."
+                )
+            }
+        return {
+            "verdict": "APPROVED",
+            "is_safe": True,
+            "violation_detected": None,
+            "comment": "CAPA safety audit passed: Proposal delegates action to human personnel."
+        }
+
+
     def review_workflow(
         self,
         intake_data: Dict[str, Any],
@@ -90,16 +131,28 @@ class QualityReviewerCriticAgent(BaseQualityAgent):
                         comments.append(f"CV AUDIT PASSED: Defect '{dtype}' detected with strong confidence ({conf:.1%}) and localized bounding box.")
 
         # 3. Audit RCA Causal Claims vs Statistical Correlations
+        unsourced_evidence_detected = False
         rca_report = rca_data.get("report")
         if rca_report:
             hyps = rca_report.get("ranked_hypotheses", []) if isinstance(rca_report, dict) else getattr(rca_report, "ranked_hypotheses", [])
             for h in hyps:
                 h_title = h.get("title", "") if isinstance(h, dict) else getattr(h, "title", "")
                 h_desc = h.get("description", "") if isinstance(h, dict) else getattr(h, "description", "")
-                claim_detected = self.scan_unsupported_causal_claims(h_title + " " + h_desc)
+                supp_ev = h.get("supporting_evidence", []) if isinstance(h, dict) else getattr(h, "supporting_evidence", [])
+                
+                # Check for unsupported causal claim in title, description, or evidence
+                all_text = f"{h_title} {h_desc} " + " ".join(supp_ev)
+                claim_detected = self.scan_unsupported_causal_claims(all_text)
                 if claim_detected:
                     unsupported_causal_detected = True
-                    comments.append(f"CRITIC VIOLATION: Unsupported causal claim detected in hypothesis '{h_title}': '{claim_detected}'")
+                    comments.append(f"CRITIC VIOLATION: Unsupported causal claim detected in hypothesis '{h_title}': '{claim_detected}'. Reassessment required.")
+
+                # Check evidence traceability: Every supporting evidence item must cite a concrete source
+                for ev in supp_ev:
+                    has_source = bool(re.search(r"(\[Source:|\bSource\b|P00\d|CNC-\d+|NCR-\d+|CAL-|02:\d\d|IMG-)", ev, re.IGNORECASE))
+                    if not has_source:
+                        unsourced_evidence_detected = True
+                        comments.append(f"CRITIC VIOLATION: Evidence item missing concrete data source in hypothesis '{h_title}': '{ev}'. Reassessment required.")
 
             if hyps:
                 top_hyp = hyps[0]
@@ -116,7 +169,8 @@ class QualityReviewerCriticAgent(BaseQualityAgent):
                         f"with required physical confirmation '{top_req}'."
                     )
 
-        # 4. Audit CAPA Completeness
+        # 4. Audit CAPA Completeness & Safety Guardrails
+        autonomous_action_detected = False
         capa_report = capa_data.get("capa")
         if capa_report:
             c_acts = capa_report.get("containment_actions", []) if isinstance(capa_report, dict) else getattr(capa_report, "containment_actions", [])
@@ -130,18 +184,34 @@ class QualityReviewerCriticAgent(BaseQualityAgent):
             else:
                 comments.append("CRITIC WARNING: Missing one or more CAPA tiers.")
 
+            # Scan all proposed actions for forbidden autonomous machine actions
+            for act in list(c_acts) + list(corr_acts) + list(prev_acts):
+                desc = act.get("description", "") if isinstance(act, dict) else getattr(act, "description", "")
+                viol = self.scan_forbidden_autonomous_actions(desc)
+                if viol:
+                    autonomous_action_detected = True
+                    comments.append(
+                        f"CRITIC SAFETY VIOLATION: Forbidden autonomous machine action detected in proposal: '{viol}'. "
+                        f"QualityMind cannot execute machine actions; all tasks must delegate to human personnel."
+                    )
+
         # 5. Optional Adversarial Critic Check (Groq openai/gpt-oss-120b at medium reasoning_effort)
         from backend.app.core.llm import universal_llm
         critic_prompt = [
             {"role": "system", "content": "You are Agent 8 Quality Critic from a different model family to prevent shared blind spots. Audit findings for calculation and causal consistency."},
-            {"role": "user", "content": f"Audit summary: verified_specs={verified_specs}, validated_calc={validated_calc}, cv_verified={cv_verified}, causal_check_failed={unsupported_causal_detected}. Confirm final approval readiness."}
+            {"role": "user", "content": f"Audit summary: verified_specs={verified_specs}, validated_calc={validated_calc}, cv_verified={cv_verified}, causal_check_failed={unsupported_causal_detected}, autonomous_violation={autonomous_action_detected}. Confirm final approval readiness."}
         ]
         critic_narrative = universal_llm.chat("agent_8", critic_prompt)
         if critic_narrative:
             tool_calls.append("tool_adversarial_critic_reasoning_groq_gpt_oss_120b")
             comments.append(f"Adversarial Model Family Audit: {critic_narrative[:100]}...")
 
-        verdict = "APPROVED" if (verified_specs and validated_calc and cv_verified and not unsupported_causal_detected) else "CONDITIONAL_APPROVAL"
+        if unsupported_causal_detected or unsourced_evidence_detected or autonomous_action_detected:
+            verdict = "REASSESS"
+        elif verified_specs and validated_calc and cv_verified:
+            verdict = "APPROVED"
+        else:
+            verdict = "CONDITIONAL_APPROVAL"
 
         critic_review = CriticReview(
             verified_spec_references=verified_specs,

@@ -100,7 +100,7 @@ def _run_tc03() -> Dict[str, Any]:
     if not os.path.exists(sample_path):
         sample_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "uploads", "samples", "metal_nut_scratch.png"))
 
-    res = vision_agent.inspect(sample_path, batch_id="BATCH-TC03", image_id="IMG-001", category="metal_nut")
+    res = vision_agent.inspect(sample_path, batch_id="BATCH-TC03", image_id="IMG-001", category="precision_shaft")
     pred = res["prediction"]
     has_bbox = pred.bounding_box is not None or pred.bbox is not None
     passed = bool(pred.defect_detected and pred.defect_type == "surface_scratch" and pred.confidence >= 0.70 and has_bbox)
@@ -108,15 +108,16 @@ def _run_tc03() -> Dict[str, Any]:
     return {
         "test_id": "TC-03",
         "scenario": "Defect image supplied",
-        "input": "Held-out real MVTec AD test image (metal_nut scratch defect, proxy part)",
-        "initial_state": "Two-Stage PatchCore (ResNet18) and MobileNetV3-Small classifier loaded in eval mode",
+        "input": "Held-out synthetic shaft image (surface_scratch defect, precision shaft)",
+        "initial_state": "MobileNetV3-Small classifier + Grad-CAM localization model loaded in eval mode",
         "expected_result": "Vision model identifies and localizes surface scratch with bounding box, anomaly score, and confidence score",
         "actual_result": f"Defect: {pred.defect_type}, Anomaly Score: {pred.anomaly_score:.3f}, Confidence: {pred.confidence:.1%}, BBox: {bbox_desc}",
         "agents_involved": ["Agent 2 (Visual Inspection)"],
-        "ml_model_output": f"Two-Stage MVTec Model: class={pred.defect_type}, anomaly_score={pred.anomaly_score:.3f}, confidence={pred.confidence:.3f}",
+        "ml_model_output": f"MobileNetV3-Small Shaft Model: class={pred.defect_type}, confidence={pred.confidence:.3f}, data_source={getattr(pred, 'data_source', 'synthetic')}",
         "evidence": f"Bounding box localized to {pred.location}. Annotated overlay created at {pred.annotated_image_url}",
         "status": "PASS" if passed else "FAIL"
     }
+
 
 def _run_tc04() -> Dict[str, Any]:
     # TC-04: Machine vibration suddenly increases -> Process anomaly detected
@@ -210,7 +211,7 @@ def _run_tc07() -> Dict[str, Any]:
         "input": "Incident with oversized diameter (+0.03 mm), vibration 3.8 mm/s, and tool cycles 1,150",
         "initial_state": "5 candidate root causes evaluated under 6M Ishikawa framework",
         "expected_result": "Evidence-ranked hypotheses with supporting vs contradicting evidence",
-        "actual_result": f"Ranked {len(hypotheses)} hypotheses. Top 1: '{hypotheses[0].title}' ({hypotheses[0].confidence_score:.0%}), Top 2: '{hypotheses[2].title}' ({hypotheses[2].confidence_score:.0%})",
+        "actual_result": f"Ranked {len(hypotheses)} hypotheses. Top 1: '{hypotheses[0].title}' ({hypotheses[0].confidence_score:.0%}), Top 2: '{hypotheses[1].title}' ({hypotheses[1].confidence_score:.0%})",
         "agents_involved": ["Agent 6 (RCA Agent)"],
         "ml_model_output": "Multi-factor evidence weighting: Tool wear=88%, Vibration=62%, Tool offset=45%, Fixture=25%, Gauge=15%",
         "evidence": f"Supporting evidence: {hypotheses[0].supporting_evidence}. Contradicting: {hypotheses[0].contradicting_evidence}",

@@ -108,6 +108,8 @@ class InspectionReport(BaseModel):
     lsl: float
     certainty: CertaintyLevel = CertaintyLevel.OBSERVED_FACT
 
+from pydantic import BaseModel, Field, model_validator
+
 # --- Visual Inspection ---
 class BoundingBox(BaseModel):
     x: int
@@ -115,25 +117,87 @@ class BoundingBox(BaseModel):
     width: int
     height: int
 
+class DefectBoundingBox(BaseModel):
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    x: Optional[int] = None
+    y: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+class DefectItem(BaseModel):
+    defect_type: str
+    confidence: float
+    bounding_box: DefectBoundingBox
+    location_zone: str = "mid_region"
+    segmentation_mask: Optional[str] = None
+
 class VisualDefectPrediction(BaseModel):
     image_id: str
     batch_id: str
-    source: str = "MVTec AD (proxy part)"
-    category: str = "metal_nut"
+    source: str = "synthetic"
+    data_source: str = "synthetic"
+    category: str = "precision_shaft"
+    product_category: Optional[str] = None
     defect_detected: bool
     anomaly_score: float = 0.0
     defect_type: str
-    raw_class: str = "good"
+    raw_class: str = "no_defect"
     confidence: float
     location: str
+    location_zone: Optional[str] = None
     bbox: Optional[Dict[str, int]] = None
     bounding_box: Optional[BoundingBox] = None
+    defects: List[DefectItem] = []
+    segmentation_mask: Optional[str] = None
+    review_status: str = "HUMAN_REVIEW_REQUIRED"
     severity: str = "High"
     certainty: CertaintyLevel = CertaintyLevel.MODEL_PREDICTION
     label: str = "MODEL_PREDICTION"
-    model_version: str = "mvtec-two-stage-v1.0"
+    model_version: str = "synthetic-shaft-v1.0"
     image_url: Optional[str] = None
     annotated_image_url: Optional[str] = None
+    product_mismatch: bool = False
+    mismatch_warning: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("product_category"):
+                data["product_category"] = data.get("category", "precision_shaft")
+            if not data.get("defects") and data.get("defect_detected"):
+                bb = data.get("bounding_box") or data.get("bbox")
+                if bb:
+                    if isinstance(bb, dict):
+                        bx = bb.get("x", 0)
+                        by = bb.get("y", 0)
+                        bw = bb.get("width", 0)
+                        bh = bb.get("height", 0)
+                        x1 = bb.get("x1", bx)
+                        y1 = bb.get("y1", by)
+                        x2 = bb.get("x2", bx + bw)
+                        y2 = bb.get("y2", by + bh)
+                    else:
+                        bx, by, bw, bh = bb.x, bb.y, bb.width, bb.height
+                        x1, y1, x2, y2 = bx, by, bx + bw, by + bh
+                    loc_zone = data.get("location_zone") or data.get("location", "mid_region")
+                    seg = data.get("segmentation_mask") or (data.get("annotated_image_url", "").split("/")[-1] if data.get("annotated_image_url") else None)
+                    data["defects"] = [{
+                        "defect_type": data.get("defect_type", "surface_defect"),
+                        "confidence": data.get("confidence", 0.9),
+                        "bounding_box": {
+                            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                            "x": bx, "y": by, "width": bw, "height": bh
+                        },
+                        "location_zone": loc_zone,
+                        "segmentation_mask": seg
+                    }]
+            if not data.get("review_status"):
+                data["review_status"] = "HUMAN_REVIEW_REQUIRED" if data.get("defect_detected") else "CONFORMING_VERIFIED"
+        return data
 
 # --- Process Monitoring & Telemetry ---
 class TelemetryDataPoint(BaseModel):
@@ -183,12 +247,12 @@ class SPCReport(BaseModel):
     ucl: float  # Statistical Upper Control Limit (Mean + 3 sigma)
     lcl: float  # Statistical Lower Control Limit (Mean - 3 sigma)
     cl: float   # Center Line (Mean)
-    usl: float  # Engineering Upper Specification Limit
-    lsl: float  # Engineering Lower Specification Limit
-    cp: float   # Capability index Cp = (USL - LSL) / (6 * sigma)
-    cpk: float  # Process capability Cpk = min((USL - mean)/(3*sigma), (mean - LSL)/(3*sigma))
-    pp: float   # Performance Pp
-    ppk: float  # Performance Ppk
+    usl: Optional[float] = None  # Engineering Upper Specification Limit
+    lsl: Optional[float] = None  # Engineering Lower Specification Limit
+    cp: Optional[float] = None   # Capability index Cp = (USL - LSL) / (6 * sigma)
+    cpk: Optional[float] = None  # Process capability Cpk = min((USL - mean)/(3*sigma), (mean - LSL)/(3*sigma))
+    pp: Optional[float] = None   # Performance Pp
+    ppk: Optional[float] = None  # Performance Ppk
     capability_assessment: str
     chart_data: List[Dict[str, Any]]
     nelson_violations: List[NelsonRuleViolation]
@@ -198,17 +262,79 @@ class SPCReport(BaseModel):
         "They are mathematically and operationally distinct concepts."
     )
     certainty: CertaintyLevel = CertaintyLevel.STATISTICAL_FINDING
+    status: str = "sufficient"
+    warnings: List[str] = []
+    sigma_within: Optional[float] = None
+    sigma_within_method: Optional[str] = None
+    sigma_overall: Optional[float] = None
+    sigma_overall_method: Optional[str] = None
+    cpk_ci_95: Optional[Dict[str, Any]] = None
+    interpretation_band: Optional[str] = None
+    guidance_notice: Optional[str] = None
+    future_guarantee_disclaimer: Optional[str] = None
+
+class CapabilityRequest(BaseModel):
+    batch_id: Optional[str] = "BATCH-0245"
+    values: List[float]
+    usl: Optional[float] = 50.05
+    lsl: Optional[float] = 49.95
+    nominal: Optional[float] = 50.00
+    subgroup_size: int = 1
+    machine_ids: Optional[List[str]] = None
+    batch_ids: Optional[List[str]] = None
+
+class CapabilityResponse(BaseModel):
+    batch_id: Optional[str] = None
+    status: str
+    sample_size: int
+    mean: Optional[float] = None
+    std_dev: Optional[float] = None
+    sigma_within: Optional[float] = None
+    sigma_within_method: Optional[str] = None
+    sigma_overall: Optional[float] = None
+    sigma_overall_method: Optional[str] = None
+    usl: Optional[float] = None
+    lsl: Optional[float] = None
+    target: Optional[float] = None
+    tolerance_band: Optional[float] = None
+    cp: Optional[float] = None
+    cpk: Optional[float] = None
+    cpu: Optional[float] = None
+    cpl: Optional[float] = None
+    pp: Optional[float] = None
+    ppk: Optional[float] = None
+    ppu: Optional[float] = None
+    ppl: Optional[float] = None
+    cpk_ci_95: Optional[Dict[str, Any]] = None
+    normality_test: Optional[Dict[str, Any]] = None
+    stability_test: Optional[Dict[str, Any]] = None
+    trend_test: Optional[Dict[str, Any]] = None
+    outliers: List[int] = []
+    assessment: Optional[str] = None
+    interpretation_band: Optional[str] = None
+    benchmark_source: Optional[str] = None
+    warnings: List[str] = []
+    guidance_notice: str
+    future_guarantee_disclaimer: str
+    label: str = "[STATISTICAL_FINDING]"
 
 # --- RCA (Root Cause Analysis) ---
 class HypothesisEvidence(BaseModel):
     hypothesis_id: str
+    rank: int = 1
     title: str
     description: str
     category: str  # Machine, Method, Material, Manpower, Measurement, Milieu (6M)
     confidence_score: float
+    evidence_score: Optional[float] = None
+    score_breakdown: Optional[Dict[str, Any]] = None
     supporting_evidence: List[str]
     contradicting_evidence: List[str]
+    missing_evidence: List[str] = []
     required_confirmation: str
+    sources: Optional[List[str]] = []
+    confidence_text: str = "Requires engineering verification"
+    epistemic_label: str = "HYPOTHESIS"
     status: str = "Under Investigation"
     certainty: CertaintyLevel = CertaintyLevel.HYPOTHESIS
 
@@ -217,6 +343,8 @@ class FiveWhysItem(BaseModel):
     question: str
     answer: str
     evidence: str
+    reasoning_type: str = "Hypothetical Reasoning"
+    epistemic_label: str = "HYPOTHESIS"
 
 class FishboneCategory(BaseModel):
     category: str
@@ -233,15 +361,24 @@ class HistoricalIncident(BaseModel):
     similarity_score: float
     action_taken: str
     certainty: CertaintyLevel = CertaintyLevel.CONFIRMED_ROOT_CAUSE
+    disclaimer: str = "Historical context only. Previous incident similarity does not establish current root cause."
+
+class HypothesisActionRequest(BaseModel):
+    decision: str  # CONFIRM, REJECT, COMMENT, REQUEST_REANALYSIS
+    comment: Optional[str] = None
 
 class RCAReport(BaseModel):
     incident_id: str
     batch_id: str
     problem_statement: str
+    rca_inputs: Optional[Dict[str, Any]] = None
     ranked_hypotheses: List[HypothesisEvidence]
     five_whys: List[FiveWhysItem]
     fishbone_diagram: List[FishboneCategory]
     historical_matches: List[HistoricalIncident]
+    correlations: Optional[List[Dict[str, Any]]] = None
+    temporal_precedence: Optional[Dict[str, Any]] = None
+    pareto_causes: Optional[Dict[str, Any]] = None
     correlation_vs_causation_note: str = (
         "IMPORTANT: Statistical correlation does not establish proven causation. "
         "Hypotheses require physical engineering verification before confirmation."

@@ -9,15 +9,19 @@ from backend.app.core.config import settings
 
 # Handle SQLite vs PostgreSQL URL specifics
 connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+if db_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
     # Ensure directory exists for sqlite file
-    if "///" in settings.DATABASE_URL:
-        db_file = settings.DATABASE_URL.split("///")[-1]
+    if "///" in db_url:
+        db_file = db_url.split("///")[-1]
         os.makedirs(os.path.dirname(os.path.abspath(db_file)), exist_ok=True)
 
 engine = create_engine(
-    settings.DATABASE_URL,
+    db_url,
     connect_args=connect_args,
     pool_pre_ping=True
 )

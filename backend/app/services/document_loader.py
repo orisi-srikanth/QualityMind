@@ -15,23 +15,29 @@ def infer_document_category(fname: str, row_dict: Optional[dict] = None) -> str:
     """Determines semantic category based on filename or contents."""
     name_lower = fname.lower()
     if "ncr" in name_lower:
-        return "ncr"
+        return "previous_ncr"
+    elif "capa" in name_lower:
+        return "capa_record"
     elif "maint" in name_lower:
-        return "maintenance"
+        return "maintenance_record"
     elif "spec" in name_lower:
         return "specification"
+    elif "inspect" in name_lower:
+        return "inspection_procedure"
     elif "sop" in name_lower:
-        return "sop"
+        return "manufacturing_sop"
     elif "manual" in name_lower or "guide" in name_lower:
-        return "manual"
+        return "machine_manual"
+    elif "standard" in name_lower or "nist" in name_lower or "handbook" in name_lower:
+        return "quality_standard"
 
     if row_dict:
         if "defect_type" in row_dict or "root_cause" in str(row_dict):
-            return "ncr"
+            return "previous_ncr"
         if "nominal_mm" in row_dict or "usl" in str(row_dict):
             return "specification"
         if "technician" in row_dict or "maintenance_type" in row_dict:
-            return "maintenance"
+            return "maintenance_record"
 
     return "quality_standard"
 
@@ -80,6 +86,7 @@ def extract_records_from_file(fpath: str, ext: str) -> Tuple[List[Dict[str, Any]
                             "file_name": fname,
                             "file_type": "csv",
                             "category": category,
+                            "document_type": category,
                             "doc_type": doc_type,
                             "record_id": str(rec_id),
                             "batch_id": str(batch_id),
@@ -128,6 +135,7 @@ def extract_records_from_file(fpath: str, ext: str) -> Tuple[List[Dict[str, Any]
                         "file_name": fname,
                         "file_type": "pdf",
                         "category": category,
+                        "document_type": category,
                         "doc_type": "pdf",
                         "record_id": f"{fname}#p{page_num}",
                         "part_number": "",
@@ -194,6 +202,7 @@ def extract_records_from_file(fpath: str, ext: str) -> Tuple[List[Dict[str, Any]
                         "file_name": fname,
                         "file_type": ext.replace(".", ""),
                         "category": category,
+                        "document_type": category,
                         "doc_type": doc_type,
                         "record_id": f"{fname}#c{c_idx+1}",
                         "part_number": part_no,
@@ -235,13 +244,14 @@ def extract_records_from_file(fpath: str, ext: str) -> Tuple[List[Dict[str, Any]
                 record_text = f"[{category.upper()} JSON RECORD {rec_id}] From file: {fname}\n" + "\n".join(item_str)
 
                 records.append({
-                    "id": f"{fname}::{rec_id}::{idx}",
+                    "id": f"{fname}::{rec_id}::0",
                     "text": record_text,
                     "metadata": {
                         "source": fpath,
                         "file_name": fname,
                         "file_type": "json",
                         "category": category,
+                        "document_type": category,
                         "doc_type": doc_type,
                         "record_id": str(rec_id),
                         "batch_id": str(batch_id),

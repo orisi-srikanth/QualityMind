@@ -9,6 +9,7 @@ import numpy as np
 from typing import Dict, Any, List
 from backend.app.agents.base_agent import BaseQualityAgent
 from backend.app.models.schemas import CertaintyLevel, SPCReport, NelsonRuleViolation
+from backend.app.services.capability import capability_engine
 
 class StatisticalProcessControlAgent(BaseQualityAgent):
     def __init__(self):
@@ -120,27 +121,23 @@ class StatisticalProcessControlAgent(BaseQualityAgent):
                 )
                 break
 
-        # Calculate Capability Indices (Cp, Cpk, Pp, Ppk)
-        # Cp = (USL - LSL) / (6 * sigma_within)
-        spec_width = usl - lsl
-        cp = round(spec_width / (6.0 * sigma_mr), 3) if sigma_mr > 0 else 0.0
+        # Compute process capability through the rigorous ProcessCapabilityEngine
+        rule_desc_list = [f"Rule {v.rule_number}: {v.rule_name}" for v in violations]
+        cap_res = capability_engine.calculate_capability(
+            values=values,
+            usl=usl,
+            lsl=lsl,
+            target=nominal,
+            subgroup_size=1,
+            is_in_control=(len(violations) == 0),
+            out_of_control_violations=rule_desc_list
+        )
 
-        cpu = (usl - mean) / (3.0 * sigma_mr) if sigma_mr > 0 else 0.0
-        cpl = (mean - lsl) / (3.0 * sigma_mr) if sigma_mr > 0 else 0.0
-        cpk = round(min(cpu, cpl), 3)
-
-        # Performance indices (overall variation)
-        pp = round(spec_width / (6.0 * std_dev), 3) if std_dev > 0 else 0.0
-        ppu = (usl - mean) / (3.0 * std_dev) if std_dev > 0 else 0.0
-        ppl = (mean - lsl) / (3.0 * std_dev) if std_dev > 0 else 0.0
-        ppk = round(min(ppu, ppl), 3)
-
-        if cpk >= 1.33:
-            cap_assessment = "Capable & Centered Process (Meets Automotive IATF Standards)"
-        elif cpk >= 1.00:
-            cap_assessment = "Marginally Capable Process (Requires Tight Process Supervision)"
-        else:
-            cap_assessment = "Incapable Process (High Defect Risk — Cpk < 1.0 indicates spec violations)"
+        cp = cap_res.get("cp")
+        cpk = cap_res.get("cpk")
+        pp = cap_res.get("pp")
+        ppk = cap_res.get("ppk")
+        cap_assessment = cap_res.get("assessment") or "Capability assessment unavailable"
 
         # Prepare rich chart data series
         chart_data = []
@@ -160,8 +157,8 @@ class StatisticalProcessControlAgent(BaseQualityAgent):
             })
 
         warning_note = ""
-        if n < 30:
-            warning_note = f"SAMPLE SIZE WARNING: Only n={n} observations available. Standard SPC requires n>=30 for robust Cpk capability estimation."
+        if cap_res.get("warnings"):
+            warning_note = " | ".join(cap_res.get("warnings", []))
 
         report = SPCReport(
             batch_id=batch_id,
@@ -181,10 +178,21 @@ class StatisticalProcessControlAgent(BaseQualityAgent):
             chart_data=chart_data,
             nelson_violations=violations,
             distinction_warning=(
-                f"{warning_note} | SPECIFICATION LIMITS (USL={usl}, LSL={lsl}) represent engineering design tolerance. "
+                (f"{warning_note} | " if warning_note else "") +
+                f"SPECIFICATION LIMITS (USL={usl}, LSL={lsl}) represent engineering design tolerance. "
                 f"STATISTICAL CONTROL LIMITS (UCL={ucl}, LCL={lcl}) represent actual 3-sigma manufacturing capability."
             ),
-            certainty=CertaintyLevel.STATISTICAL_FINDING
+            certainty=CertaintyLevel.STATISTICAL_FINDING,
+            status=cap_res.get("status", "sufficient"),
+            warnings=cap_res.get("warnings", []),
+            sigma_within=cap_res.get("sigma_within"),
+            sigma_within_method=cap_res.get("sigma_within_method"),
+            sigma_overall=cap_res.get("sigma_overall"),
+            sigma_overall_method=cap_res.get("sigma_overall_method"),
+            cpk_ci_95=cap_res.get("cpk_ci_95"),
+            interpretation_band=cap_res.get("interpretation_band"),
+            guidance_notice=cap_res.get("guidance_notice"),
+            future_guarantee_disclaimer=cap_res.get("future_guarantee_disclaimer")
         )
 
         duration = int((time.time() - start) * 1000)

@@ -9,7 +9,7 @@ from sqlalchemy import (
     Column, Integer, Float, String, Boolean, Text, DateTime, ForeignKey, Index
 )
 from sqlalchemy.orm import relationship
-from backend.app.db.session import Base
+from backend.app.database.session import Base
 
 def gen_uuid() -> str:
     return str(uuid.uuid4())
@@ -35,10 +35,12 @@ class Product(Base):
     part_number = Column(String, unique=True, index=True, nullable=False)
     process = Column(String, nullable=False)
     material = Column(String, nullable=False)
-    family = Column(String, nullable=False)  # Precision Shafts, Bearings, Bushings
+    family = Column(String, default="Precision Shafts")
+    machine_id = Column(String, ForeignKey("machines.id"), nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
-    characteristics = relationship("InspectionCharacteristic", back_populates="product")
+    machine = relationship("Machine")
+    characteristics = relationship("InspectionCharacteristic", back_populates="product", cascade="all, delete-orphan")
     batches = relationship("Batch", back_populates="product")
 
 # 3. Production Machinery
@@ -106,6 +108,10 @@ class Measurement(Base):
     subgroup = Column(Integer, default=1)
     status = Column(String, default="conforming")  # conforming, nonconforming
     deviation_from_limit = Column(Float, default=0.0)  # + beyond USL or - beyond LSL
+    source_type = Column(String, default="manual")  # csv, excel, manual
+    file_name = Column(String, nullable=True)
+    uploaded_by = Column(String, nullable=True)
+    upload_time = Column(DateTime, default=utc_now)
 
     batch = relationship("Batch", back_populates="measurements")
 
@@ -116,7 +122,11 @@ class InspectionImage(Base):
     batch_id = Column(String, ForeignKey("batches.id"), nullable=False, index=True)
     component_id = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
+    file_name = Column(String, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    sha256_hash = Column(String, nullable=True)
     uploaded_at = Column(DateTime, default=utc_now)
+    uploaded_by = Column(String, nullable=True)
 
     batch = relationship("Batch", back_populates="images")
     findings = relationship("VisualFinding", back_populates="image")
@@ -211,6 +221,7 @@ class QualityIncident(Base):
     defect_type = Column(String, nullable=False)
     severity = Column(String, default="HIGH")  # LOW, MEDIUM, HIGH, CRITICAL
     status = Column(String, default="open")     # open, under_investigation, awaiting_approval, closed
+    rejection_reason = Column(String, nullable=True)  # Recorded nonconformance rejection reason
     created_at = Column(DateTime, default=utc_now)
 
     batch = relationship("Batch", back_populates="incidents")
@@ -256,20 +267,33 @@ class CAPAAction(Base):
     __tablename__ = "capa_actions"
     id = Column(String, primary_key=True, default=gen_uuid)
     incident_id = Column(String, ForeignKey("quality_incidents.id"), nullable=False, index=True)
+    hypothesis_id = Column(String, ForeignKey("rca_hypotheses.id"), nullable=True, index=True)
     action_code = Column(String, unique=True, index=True, nullable=False)  # e.g. CAPA-2026-001
     type = Column(String, nullable=False)  # containment, corrective, preventive
     description = Column(Text, nullable=False)
-    responsible_role = Column(String, nullable=False)
-    due_date = Column(String, nullable=False)
+    suggested_role = Column(String, nullable=True)  # Suggested role by agent prior to approval
+    responsible_role = Column(String, nullable=True)  # Assigned upon engineering approval
+    due_date = Column(String, nullable=False)  # YYYY-MM-DD
     status = Column(String, default="proposed")  # proposed, approved, in_progress, completed, verified, rejected
     evidence = Column(Text, default="")
-    completion_date = Column(String, nullable=True)
+    evidence_file_path = Column(String, nullable=True)
+    completion_date = Column(String, nullable=True)  # YYYY-MM-DD
     effectiveness_result = Column(Text, nullable=True)
     approved_by = Column(String, ForeignKey("users.id"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
 
     incident = relationship("QualityIncident", back_populates="capas")
+    hypothesis = relationship("RCAHypothesis")
+    approver = relationship("User", foreign_keys=[approved_by])
     effectiveness_checks = relationship("EffectivenessCheck", back_populates="capa")
+
+# 16b. Sequential Sequence Counter for CAPA Action IDs (prevents reuse even after deletion)
+class CAPASequence(Base):
+    __tablename__ = "capa_sequences"
+    year = Column(Integer, primary_key=True)
+    last_seq = Column(Integer, nullable=False, default=0)
 
 # 17. Effectiveness Monitoring Checks
 class EffectivenessCheck(Base):

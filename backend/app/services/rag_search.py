@@ -183,6 +183,7 @@ class ManufacturingVectorStore:
             doc = self.documents[idx]
             if score > 0.05:
                 doc_copy = dict(doc)
+                doc_copy["incident_id"] = doc.get("id")
                 doc_copy["similarity_score"] = round(min(0.99, score), 3)
                 doc_copy["context_notice"] = "Historical context only. Historical similarity does not establish the same root cause."
                 doc_copy["data_provenance"] = doc.get("provenance", "synthetic_illustrative")

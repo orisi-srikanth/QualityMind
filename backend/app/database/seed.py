@@ -2,11 +2,14 @@
 Database Seeding Script for QualityMind Platform
 Creates demo users, machines, products, tolerances, baselines, and historical knowledge base.
 """
+import os
+import json
 from datetime import datetime, timezone
 from backend.app.db.session import engine, SessionLocal, Base
 from backend.app.db.models import (
     User, Product, Machine, InspectionCharacteristic, ProcessBaseline,
-    HistoricalIncident, MaintenanceRecord
+    ProcessReading, HistoricalIncident, MaintenanceRecord,
+    Batch, Measurement, QualityIncident, RCAHypothesis, CAPAAction
 )
 from backend.app.core.security import hash_password, UserRole
 
@@ -61,7 +64,8 @@ def seed_database():
                     part_number="PS-2026-101",
                     process="CNC Lathe Turning & Cylindrical Grinding",
                     material="Carbon Steel AISI 1045",
-                    family="Precision Shafts"
+                    family="Precision Shafts",
+                    machine_id="mach-04"
                 ),
                 Product(
                     id="prod-bh-202",
@@ -69,7 +73,8 @@ def seed_database():
                     part_number="BH-2026-202",
                     process="CNC Milling & Boring",
                     material="Ductile Cast Iron 65-45-12",
-                    family="Bearings"
+                    family="Bearings",
+                    machine_id="mach-02"
                 ),
                 Product(
                     id="prod-fb-303",
@@ -77,7 +82,8 @@ def seed_database():
                     part_number="FB-2026-303",
                     process="CNC Turning & Facing",
                     material="Phosphor Bronze C54400",
-                    family="Bushings"
+                    family="Bushings",
+                    machine_id="mach-03"
                 ),
             ]
             db.add_all(products)
@@ -129,18 +135,61 @@ def seed_database():
             db.add_all(chars)
 
         # 5. Seed Process Baselines for CNC-04
-        if db.query(ProcessBaseline).count() == 0:
-            baselines = [
-                ProcessBaseline(id="base-01", machine_id="mach-04", parameter="spindle_speed", mean=1200.0, std=5.0, p01=1185.0, p99=1215.0, lower_threshold=1150.0, upper_threshold=1250.0, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-02", machine_id="mach-04", parameter="feed_rate", mean=0.20, std=0.005, p01=0.185, p99=0.215, lower_threshold=0.17, upper_threshold=0.23, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-03", machine_id="mach-04", parameter="coolant_temp", mean=24.0, std=0.8, p01=22.0, p99=26.0, lower_threshold=18.0, upper_threshold=28.0, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-04", machine_id="mach-04", parameter="vibration", mean=2.1, std=0.2, p01=1.6, p99=2.6, lower_threshold=1.0, upper_threshold=3.5, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-05", machine_id="mach-04", parameter="tool_usage_cycles", mean=450.0, std=120.0, p01=50.0, p99=800.0, lower_threshold=0.0, upper_threshold=1000.0, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-06", machine_id="mach-04", parameter="motor_current", mean=14.5, std=0.5, p01=13.0, p99=16.0, lower_threshold=10.0, upper_threshold=18.0, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-07", machine_id="mach-04", parameter="cycle_time", mean=45.0, std=1.2, p01=42.0, p99=48.0, lower_threshold=38.0, upper_threshold=52.0, computed_from="Certified Baseline 10-Day Run"),
-                ProcessBaseline(id="base-08", machine_id="mach-04", parameter="pressure", mean=5.5, std=0.2, p01=5.0, p99=6.0, lower_threshold=4.5, upper_threshold=6.5, computed_from="Certified Baseline 10-Day Run"),
-            ]
-            db.add_all(baselines)
+        if db.query(ProcessBaseline).count() < 32:
+            baselines = []
+            for m_id in ["mach-01", "mach-02", "mach-03", "mach-04"]:
+                if db.query(ProcessBaseline).filter_by(machine_id=m_id).count() == 0:
+                    baselines.extend([
+                        ProcessBaseline(id=f"base-{m_id}-01", machine_id=m_id, parameter="spindle_speed", mean=1200.0, std=5.0, p01=1185.0, p99=1215.0, lower_threshold=1150.0, upper_threshold=1250.0, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-02", machine_id=m_id, parameter="feed_rate", mean=0.20, std=0.005, p01=0.185, p99=0.215, lower_threshold=0.17, upper_threshold=0.23, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-03", machine_id=m_id, parameter="coolant_temp", mean=24.0, std=0.8, p01=22.0, p99=26.0, lower_threshold=18.0, upper_threshold=28.0, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-04", machine_id=m_id, parameter="vibration", mean=2.1, std=0.2, p01=1.6, p99=2.6, lower_threshold=1.0, upper_threshold=3.5, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-05", machine_id=m_id, parameter="tool_usage_cycles", mean=450.0, std=120.0, p01=50.0, p99=800.0, lower_threshold=0.0, upper_threshold=1000.0, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-06", machine_id=m_id, parameter="motor_current", mean=14.5, std=0.5, p01=13.0, p99=16.0, lower_threshold=10.0, upper_threshold=18.0, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-07", machine_id=m_id, parameter="cycle_time", mean=45.0, std=1.2, p01=42.0, p99=48.0, lower_threshold=38.0, upper_threshold=52.0, computed_from="Certified Baseline 10-Day Run"),
+                        ProcessBaseline(id=f"base-{m_id}-08", machine_id=m_id, parameter="pressure", mean=5.5, std=0.2, p01=5.0, p99=6.0, lower_threshold=4.5, upper_threshold=6.5, computed_from="Certified Baseline 10-Day Run"),
+                    ])
+            if baselines:
+                db.add_all(baselines)
+                db.commit()
+
+        # Seed ProcessReadings from process_readings.csv if count < 780
+        if db.query(ProcessReading).count() < 780:
+            csv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "process", "process_readings.csv"))
+            if os.path.exists(csv_path):
+                import pandas as pd
+                df_proc = pd.read_csv(csv_path)
+                batch_map = {b.batch_number: b.id for b in db.query(Batch).all()}
+                batch_map.update({b.id: b.id for b in db.query(Batch).all()})
+                readings = []
+                for _, r in df_proc.iterrows():
+                    b_id = batch_map.get(r["batch_id"])
+                    if b_id:
+                        ts_val = r["ts"]
+                        if isinstance(ts_val, str):
+                            ts_dt = datetime.strptime(ts_val, "%Y-%m-%d %H:%M:%S")
+                        else:
+                            ts_dt = ts_val
+                        readings.append(
+                            ProcessReading(
+                                machine_id=r["machine_id"],
+                                batch_id=b_id,
+                                ts=ts_dt,
+                                spindle_speed=float(r["spindle_speed"]),
+                                feed_rate=float(r["feed_rate"]),
+                                coolant_temp=float(r["coolant_temp"]),
+                                vibration=float(r["vibration"]),
+                                tool_usage_cycles=int(r["tool_usage_cycles"]),
+                                motor_current=float(r["motor_current"]),
+                                cycle_time=float(r["cycle_time"]),
+                                pressure=float(r.get("pressure", 5.5))
+                            )
+                        )
+                if readings:
+                    db.query(ProcessReading).delete()
+                    db.bulk_save_objects(readings)
+                    db.commit()
+
 
         # 6. Seed Historical Incidents for RAG
         if db.query(HistoricalIncident).count() == 0:
@@ -206,55 +255,137 @@ def seed_database():
             ]
             db.add_all(records)
 
-        # 8. Seed Quality Incidents & CAPA Actions from capa_records.json
-        import os, json
-        from backend.app.db.models import QualityIncident, CAPAAction, Batch, Measurement
-        
-        # Ensure anchor batch BATCH-0245 exists or get first batch
+        # 8. Seed Quality Incidents & RCA Hypotheses
         b245 = db.query(Batch).filter_by(batch_number="BATCH-0245").first()
         b_id = b245.id if b245 else "batch-0245"
+        b_map = {b.batch_number: b.id for b in db.query(Batch).all()}
 
-        if db.query(QualityIncident).count() == 0:
-            # Create representative quality incidents for historical and active NCRs
-            incidents_to_add = [
-                QualityIncident(
-                    id="inc-ncr-019",
-                    batch_id=b_id,
-                    title="NCR-019: Dimensional increase associated with confirmed tool wear",
-                    defect_type="Oversized shaft diameter",
-                    severity="HIGH",
-                    status="closed",
-                    created_at=datetime(2026, 3, 14, tzinfo=timezone.utc)
-                ),
-                QualityIncident(
-                    id="inc-ncr-011",
-                    batch_id=b_id,
-                    title="NCR-011: Excessive tool wear and dimensional drift",
-                    defect_type="Oversized shaft diameter",
-                    severity="HIGH",
-                    status="closed",
-                    created_at=datetime(2026, 8, 22, tzinfo=timezone.utc)
-                ),
-                QualityIncident(
-                    id="inc-ncr-012",
-                    batch_id=b_id,
-                    title="NCR-012: Spindle vibration chatter on turning pass",
-                    defect_type="Surface scratch / score",
-                    severity="MEDIUM",
-                    status="closed",
-                    created_at=datetime(2026, 8, 24, tzinfo=timezone.utc)
-                ),
-                QualityIncident(
-                    id="inc-ncr-014",
-                    batch_id=b_id,
-                    title="NCR-014: Spindle vibration chatter and bearing harmonic",
-                    defect_type="Machine vibration chatter",
-                    severity="HIGH",
-                    status="closed",
-                    created_at=datetime(2026, 9, 1, tzinfo=timezone.utc)
-                )
+        if db.query(QualityIncident).count() < 20:
+            # Clear previous partial incidents if needed
+            db.query(RCAHypothesis).delete()
+            db.query(QualityIncident).delete()
+            db.commit()
+
+            incident_specs = [
+                # ID, Batch Number, Defect Type, Rejection Reason, Severity, Created At, Confirmed Root Cause Title
+                ("inc-ncr-019", "BATCH-0245", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 3, 14, 10, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-ncr-011", "BATCH-0245", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 22, 14, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-ncr-012", "BATCH-0245", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 24, 9, 30, tzinfo=timezone.utc), "Spindle Bearing Harmonic Vibration"),
+                ("inc-ncr-014", "BATCH-0245", "Machine vibration chatter", "Vibration Chatter Pattern", "HIGH", datetime(2026, 9, 1, 11, 15, tzinfo=timezone.utc), "Spindle Bearing Harmonic Vibration"),
+                ("inc-005", "BATCH-0003", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 16, 16, 20, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-006", "BATCH-0006", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc), "Incorrect Tool Offset Preset"),
+                ("inc-007", "BATCH-0009", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 28, 20, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-008", "BATCH-0012", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 9, 3, 8, 45, tzinfo=timezone.utc), "Thermal Expansion of Workpiece"),
+                ("inc-009", "BATCH-0003", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-010", "BATCH-0001", "Undersized bore diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 12, 15, 30, tzinfo=timezone.utc), "Thermal Expansion of Workpiece"),
+                ("inc-011", "BATCH-0004", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 18, 10, 0, tzinfo=timezone.utc), "Coolant Chip Recirculation"),
+                ("inc-012", "BATCH-0007", "Undersized bore diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 24, 17, 0, tzinfo=timezone.utc), "Thermal Expansion of Workpiece"),
+                ("inc-013", "BATCH-0010", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 30, 14, 15, tzinfo=timezone.utc), "Coolant Chip Recirculation"),
+                ("inc-014", "BATCH-0002", "Flange thickness deviation", "Geometric Runout", "MEDIUM", datetime(2026, 8, 14, 11, 0, tzinfo=timezone.utc), "Loose Collet Fixturing"),
+                ("inc-015", "BATCH-0005", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 20, 13, 45, tzinfo=timezone.utc), "Coolant Chip Recirculation"),
+                ("inc-016", "BATCH-0008", "Flange thickness deviation", "Geometric Runout", "MEDIUM", datetime(2026, 8, 26, 16, 30, tzinfo=timezone.utc), "Loose Collet Fixturing"),
+                ("inc-017", "BATCH-0011", "Machine vibration chatter", "Vibration Chatter Pattern", "HIGH", datetime(2026, 9, 1, 9, 0, tzinfo=timezone.utc), "Spindle Bearing Harmonic Vibration"),
+                ("inc-018", "BATCH-0009", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 9, 15, 14, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-019", "BATCH-0245", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 10, 10, 3, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
+                ("inc-020", "BATCH-0001", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 10, 2, 11, 0, tzinfo=timezone.utc), "Coolant Chip Recirculation")
             ]
+
+            incidents_to_add = []
+            hypotheses_to_add = []
+
+            for inc_id, b_num, def_type, rej_reason, sev, c_at, confirmed_cause in incident_specs:
+                target_b_id = b_map.get(b_num, b_id)
+                incidents_to_add.append(
+                    QualityIncident(
+                        id=inc_id,
+                        batch_id=target_b_id,
+                        title=f"{inc_id.upper()}: {def_type}",
+                        defect_type=def_type,
+                        rejection_reason=rej_reason,
+                        severity=sev,
+                        status="closed",
+                        created_at=c_at
+                    )
+                )
+                hypotheses_to_add.append(
+                    RCAHypothesis(
+                        id=f"hyp-conf-{inc_id}",
+                        incident_id=inc_id,
+                        rank=1,
+                        category="Machine" if "Machine" in confirmed_cause or "Tool" in confirmed_cause or "Spindle" in confirmed_cause else "Method",
+                        title=confirmed_cause,
+                        label="CONFIRMED_ROOT_CAUSE",
+                        status="confirmed",
+                        reviewer_id="usr-qe-01",
+                        evidence_score=0.92,
+                        comment="Confirmed by Lead Quality Engineer (Sarah Chen) with physical toolmakers inspection."
+                    )
+                )
+
+            # Also seed unconfirmed hypotheses: 3 proposed, 2 rejected (to verify root cause filter excludes them)
+            hypotheses_to_add.extend([
+                RCAHypothesis(
+                    id="hyp-prop-01",
+                    incident_id="inc-ncr-019",
+                    rank=2,
+                    category="Material",
+                    title="Defective Raw Bar Stock Alloy",
+                    label="HYPOTHESIS",
+                    status="proposed",
+                    evidence_score=0.45,
+                    confidence_text="Requires metallurgy lab mill cert verification"
+                ),
+                RCAHypothesis(
+                    id="hyp-prop-02",
+                    incident_id="inc-ncr-011",
+                    rank=2,
+                    category="Method",
+                    title="Operator Feed Override Error",
+                    label="HYPOTHESIS",
+                    status="proposed",
+                    evidence_score=0.38,
+                    confidence_text="Requires CNC G-code override history log analysis"
+                ),
+                RCAHypothesis(
+                    id="hyp-prop-03",
+                    incident_id="inc-ncr-012",
+                    rank=2,
+                    category="Machine",
+                    title="Coolant Delivery Pressure Fluctuation",
+                    label="HYPOTHESIS",
+                    status="proposed",
+                    evidence_score=0.41,
+                    confidence_text="Requires manifold pressure transducer trace verification"
+                ),
+                RCAHypothesis(
+                    id="hyp-rej-01",
+                    incident_id="inc-ncr-019",
+                    rank=3,
+                    category="Environment",
+                    title="Electrical Supply Phase Imbalance",
+                    label="HYPOTHESIS",
+                    status="rejected",
+                    reviewer_id="usr-qe-01",
+                    evidence_score=0.12,
+                    comment="Power quality monitoring confirmed steady 480V ±1.2% line voltage across shift."
+                ),
+                RCAHypothesis(
+                    id="hyp-rej-02",
+                    incident_id="inc-ncr-014",
+                    rank=3,
+                    category="Environment",
+                    title="Ambient Factory Temperature Shift",
+                    label="HYPOTHESIS",
+                    status="rejected",
+                    reviewer_id="usr-qe-01",
+                    evidence_score=0.10,
+                    comment="Climate control logs indicate shop floor temperature remained steady at 20.2°C."
+                )
+            ])
+
             db.add_all(incidents_to_add)
+            db.commit()
+            db.add_all(hypotheses_to_add)
             db.commit()
 
         if db.query(CAPAAction).count() == 0:
@@ -294,7 +425,7 @@ def seed_database():
                 product_id="prod-ps-101",
                 machine_id="mach-04",
                 shift="Night Shift",
-                quantity=500,
+                quantity=1000,
                 material_lot="LOT-PRE-881",
                 operator_ref="OP-44",
                 start_time=datetime(2026, 9, 20, 2, 0, tzinfo=timezone.utc),
@@ -305,15 +436,15 @@ def seed_database():
             db.add(b_pre)
             db.commit()
 
-            # Add 500 measurements: exactly 41 nonconforming (8.2%)
+            # Add 1000 measurements: exactly 82 nonconforming (8.2%)
             meas_pre = []
-            for i in range(500):
-                is_defect = (i < 41)
+            for i in range(1000):
+                is_defect = (i < 82)
                 meas_pre.append(
                     Measurement(
                         batch_id=b_pre.id,
                         characteristic_id="char-ps-01",
-                        component_id=f"P-PRE-{i+1:03d}",
+                        component_id=f"P-PRE-{i+1:04d}",
                         value=50.07 if is_defect else 50.01,
                         unit="mm",
                         measured_at=datetime(2026, 9, 20, 3, 0, tzinfo=timezone.utc),
@@ -333,7 +464,7 @@ def seed_database():
                 product_id="prod-ps-101",
                 machine_id="mach-04",
                 shift="Night Shift",
-                quantity=500,
+                quantity=1000,
                 material_lot="LOT-POST-882",
                 operator_ref="OP-44",
                 start_time=datetime(2026, 10, 5, 2, 0, tzinfo=timezone.utc),
@@ -344,15 +475,15 @@ def seed_database():
             db.add(b_post)
             db.commit()
 
-            # Add 500 measurements: exactly 6 nonconforming (1.2%, with relative reduction -85.4% ~ -86%)
+            # Add 1000 measurements: exactly 11 nonconforming (1.1%, p-bar=0.0465, z=7.540)
             meas_post = []
-            for i in range(500):
-                is_defect = (i < 6)
+            for i in range(1000):
+                is_defect = (i < 11)
                 meas_post.append(
                     Measurement(
                         batch_id=b_post.id,
                         characteristic_id="char-ps-01",
-                        component_id=f"P-POST-{i+1:03d}",
+                        component_id=f"P-POST-{i+1:04d}",
                         value=50.06 if is_defect else 50.01,
                         unit="mm",
                         measured_at=datetime(2026, 10, 5, 3, 0, tzinfo=timezone.utc),

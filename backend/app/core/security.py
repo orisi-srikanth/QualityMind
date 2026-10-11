@@ -78,3 +78,41 @@ def require_roles(*allowed_roles: UserRole):
             )
         return user
     return role_checker
+
+
+def require_authenticated_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dict[str, Any]:
+    """
+    Strict authentication dependency.
+    Rejects unauthenticated requests with HTTP 401 Unauthorized if Bearer token is missing or invalid.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication credentials were not provided (Bearer token required).",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
+
+def require_authenticated_role(*allowed_roles: str):
+    """
+    Strict authentication and RBAC dependency.
+    Requires valid Bearer token (raises 401 if missing/invalid)
+    and validates user role against allowed_roles (raises 403 if unauthorized).
+    """
+    def checker(user: Dict[str, Any] = Depends(require_authenticated_user)):
+        user_role = user.get("role")
+        if user_role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: Action requires one of roles {list(allowed_roles)}, but user has '{user_role}'."
+            )
+        return user
+    return checker
+
