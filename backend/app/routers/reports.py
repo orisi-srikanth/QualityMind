@@ -4,7 +4,7 @@ Pareto charts, CAPA effectiveness z-tests, executive KPIs, and ISO 9001 PDF gene
 """
 import os
 from fastapi import APIRouter, Response, Depends, Query, HTTPException
-from typing import Optional
+from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from backend.app.services.pdf_report import generate_quality_pdf_report
 from backend.app.orchestrator.engine import orchestrator
