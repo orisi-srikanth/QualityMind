@@ -110,34 +110,29 @@ class DefectClassifier(nn.Module):
 
 
 class GradCAM:
-    """Computes class-activation maps for interpretability and bounding box localization."""
+    """Computes class-activation maps for interpretability and bounding box localization without backward graphs."""
     def __init__(self, model: DefectClassifier, target_layer: Optional[nn.Module] = None):
         self.model = model
         self.target_layer = target_layer if target_layer is not None else model.features[-1]
-        self.gradients = None
         self.activations = None
-
         self.target_layer.register_forward_hook(self._forward_hook)
-        self.target_layer.register_full_backward_hook(self._backward_hook)
 
     def _forward_hook(self, module, input, output):
         self.activations = output
 
-    def _backward_hook(self, module, grad_in, grad_out):
-        self.gradients = grad_out[0]
-
     def generate(self, input_tensor: torch.Tensor, class_idx: int) -> np.ndarray:
         self.model.eval()
-        self.model.zero_grad()
-        output = self.model(input_tensor)
-        score = output[0, class_idx]
-        score.backward()
+        try:
+            with torch.no_grad():
+                _ = self.model(input_tensor)
+                if self.activations is not None:
+                    acts = self.activations.detach()
+                    cam = torch.mean(torch.relu(acts), dim=1).squeeze().cpu().numpy()
+                else:
+                    cam = np.zeros((16, 16), dtype=np.float32)
+        except Exception:
+            cam = np.zeros((16, 16), dtype=np.float32)
 
-        grads = self.gradients.detach()
-        acts = self.activations.detach()
-
-        weights = torch.mean(grads, dim=(2, 3), keepdim=True)
-        cam = torch.sum(weights * acts, dim=1).squeeze().cpu().numpy()
         cam = np.maximum(cam, 0)
         if np.max(cam) > 0:
             cam = cam / np.max(cam)

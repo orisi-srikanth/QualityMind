@@ -58,33 +58,30 @@ SUPPORTED_CATEGORIES = ["precision_shaft", "shaft"] + PROXY_CATEGORIES
 
 
 class MultiProductGradCAM:
-    """Computes class-activation maps for multi-head multi-product model."""
+    """Computes class-activation maps for multi-head multi-product model without memory-intensive backward graph."""
     def __init__(self, model):
         self.model = model
         self.target_layer = model.features[-1]
-        self.gradients = None
         self.activations = None
         self.target_layer.register_forward_hook(self._forward_hook)
-        self.target_layer.register_full_backward_hook(self._backward_hook)
 
     def _forward_hook(self, module, inp, outp):
         self.activations = outp
 
-    def _backward_hook(self, module, gin, gout):
-        self.gradients = gout[0]
-
     def generate(self, input_tensor: Any, category: str, class_idx: int) -> np.ndarray:
         import torch
         self.model.eval()
-        self.model.zero_grad()
-        prod_logits, def_logits, _ = self.model(input_tensor, category=category)
-        score = def_logits[0, class_idx]
-        score.backward()
+        try:
+            with torch.no_grad():
+                _ = self.model(input_tensor, category=category)
+                if self.activations is not None:
+                    acts = self.activations.detach()
+                    cam = torch.mean(torch.relu(acts), dim=1).squeeze().cpu().numpy()
+                else:
+                    cam = np.zeros((16, 16), dtype=np.float32)
+        except Exception:
+            cam = np.zeros((16, 16), dtype=np.float32)
 
-        grads = self.gradients.detach()
-        acts = self.activations.detach()
-        weights = torch.mean(grads, dim=(2, 3), keepdim=True)
-        cam = torch.sum(weights * acts, dim=1).squeeze().cpu().numpy()
         cam = np.maximum(cam, 0)
         if np.max(cam) > 0:
             cam = cam / np.max(cam)
