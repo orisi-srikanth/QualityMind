@@ -31,7 +31,25 @@ jobs:
 
       - name: Run Test Suite (TC-01..TC-08 and Unit Tests)
         run: |
-          pytest backend/tests/ -v
+          set -o pipefail
+          pytest backend/tests/ -v --tb=short 2>&1 | tee pytest_output.log
+
+      - name: Publish Test Summary to GitHub Actions Summary
+        if: always()
+        run: |
+          echo "### Backend Pytest Results" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          if [ -f pytest_output.log ]; then
+            tail -n 80 pytest_output.log >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Test Log Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-logs
+          path: pytest_output.log
 
       - name: Run Test Scenarios Documentation Harness
         run: |
