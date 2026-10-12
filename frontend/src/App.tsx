@@ -39,6 +39,7 @@ const PIPELINE_STAGES: PipelineStep[] = [
 export function App() {
   const [activePage, setActivePage] = useState("dashboard");
   const [userRole, setUserRole] = useState<"admin" | "quality_engineer" | "operator">("quality_engineer");
+  const [activeWorkflowId, setActiveWorkflowId] = useState<string>("WF-C038A990");
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -71,20 +72,11 @@ export function App() {
     setCompletedSteps([]);
     setPipelineFinishedBanner(false);
 
-    // Simulated progress stepper matching real execution
-    const stepInterval = setInterval(() => {
-      setCurrentStepIndex((prev) => {
-        if (prev < PIPELINE_STAGES.length - 1) {
-          setCompletedSteps((c) => [...c, prev + 1]);
-          return prev + 1;
-        }
-        return prev;
-      });
-    }, 700);
-
     try {
-      await api.runOrchestratedPipeline("BATCH-0245");
-      clearInterval(stepInterval);
+      const res = await api.runOrchestratedPipeline("BATCH-0245");
+      if (res?.workflow_id) {
+        setActiveWorkflowId(res.workflow_id);
+      }
       setCompletedSteps(PIPELINE_STAGES.map((s) => s.id));
       setCurrentStepIndex(PIPELINE_STAGES.length - 1);
       setTimeout(() => {
@@ -94,7 +86,6 @@ export function App() {
         setTimeout(() => setPipelineFinishedBanner(false), 8000);
       }, 900);
     } catch (e) {
-      clearInterval(stepInterval);
       alert("Analysis could not be completed. Please try again.");
     } finally {
       setIsRunningPipeline(false);
@@ -114,7 +105,15 @@ export function App() {
       case "product-config":
         return <ProductConfigPage />;
       case "batches":
-        return <BatchesPage onNavigate={setActivePage} />;
+        return (
+          <BatchesPage
+            onNavigate={setActivePage}
+            onSelectWorkflow={(wfId: string) => {
+              setActiveWorkflowId(wfId);
+              setActivePage("ai-review");
+            }}
+          />
+        );
       case "inspection":
         return <InspectionPage />;
       case "visual-inspection":
@@ -130,7 +129,14 @@ export function App() {
       case "capa":
         return <CapaPage />;
       case "ai-review":
-        return <AiReviewPage onRunPipeline={handleRunPipeline} isRunningPipeline={isRunningPipeline} userRole={userRole} />;
+        return (
+          <AiReviewPage
+            onRunPipeline={handleRunPipeline}
+            isRunningPipeline={isRunningPipeline}
+            userRole={userRole}
+            workflowId={activeWorkflowId}
+          />
+        );
       case "reports":
         return <ReportsPage />;
       case "test-scenarios":

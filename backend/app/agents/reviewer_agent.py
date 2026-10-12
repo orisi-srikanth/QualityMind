@@ -171,7 +171,7 @@ class QualityReviewerCriticAgent(BaseQualityAgent):
 
         # 4. Audit CAPA Completeness & Safety Guardrails
         autonomous_action_detected = False
-        capa_report = capa_data.get("capa")
+        capa_report = capa_data.get("capa") if capa_data else None
         if capa_report:
             c_acts = capa_report.get("containment_actions", []) if isinstance(capa_report, dict) else getattr(capa_report, "containment_actions", [])
             corr_acts = capa_report.get("corrective_actions", []) if isinstance(capa_report, dict) else getattr(capa_report, "corrective_actions", [])

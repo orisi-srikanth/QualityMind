@@ -188,11 +188,17 @@ def download_pdf_report(batch_id: str = "BATCH-0245", sample_name: Optional[str]
                 sample_img = p
                 break
 
-    state = orchestrator.run_full_pipeline(
-        batch_meta={"batch_id": batch_id, "part_number": "PS-2026-101", "machine": "CNC-04", "quantity": 500, "nominal_mm": 50.00, "tolerance_mm": 0.05},
-        image_path=sample_img
-    )
-    pdf_bytes = generate_quality_pdf_report(state.model_dump())
+    existing_wf = orchestrator.get_latest_workflow_for_batch(batch_id)
+    if existing_wf:
+        state_dict = existing_wf.model_dump() if hasattr(existing_wf, "model_dump") else (existing_wf if isinstance(existing_wf, dict) else dict(existing_wf))
+    else:
+        state = orchestrator.run_full_pipeline(
+            batch_meta={"batch_id": batch_id, "part_number": "PS-2026-101", "machine": "CNC-04", "quantity": 500, "nominal_mm": 50.00, "tolerance_mm": 0.05},
+            image_path=sample_img
+        )
+        state_dict = state.model_dump()
+
+    pdf_bytes = generate_quality_pdf_report(state_dict)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

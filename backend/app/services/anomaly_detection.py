@@ -395,8 +395,8 @@ class HybridAnomalyDetector:
                     warnings.append(f"Converted vibration from in/s to mm/s at '{ts_str}'.")
                 except (ValueError, TypeError):
                     pass
-            elif "vibration" in item or "machine_vibration_mms" in item:
-                val = item.get("vibration", item.get("machine_vibration_mms"))
+            elif "vibration" in item or "machine_vibration_mms" in item or "vibration_mm_s" in item:
+                val = item.get("vibration") if item.get("vibration") is not None else (item.get("machine_vibration_mms") if item.get("machine_vibration_mms") is not None else item.get("vibration_mm_s"))
                 item["vibration"] = _clean_val(val, 2.1)
                 if val is None or (isinstance(val, float) and np.isnan(val)):
                     warnings.append(f"Missing or NaN vibration reading at '{ts_str}'; imputed baseline 2.1 mm/s.")
@@ -411,8 +411,8 @@ class HybridAnomalyDetector:
                     warnings.append(f"Converted coolant temperature from °F to °C at '{ts_str}'.")
                 except (ValueError, TypeError):
                     pass
-            elif "coolant_temp" in item or "coolant_temperature_c" in item:
-                val = item.get("coolant_temp", item.get("coolant_temperature_c"))
+            elif "coolant_temp" in item or "coolant_temperature_c" in item or "temperature_c" in item:
+                val = item.get("coolant_temp") if item.get("coolant_temp") is not None else (item.get("coolant_temperature_c") if item.get("coolant_temperature_c") is not None else item.get("temperature_c"))
                 item["coolant_temp"] = _clean_val(val, 24.0)
                 if val is None or (isinstance(val, float) and np.isnan(val)):
                     warnings.append(f"Missing or NaN coolant temperature at '{ts_str}'; imputed baseline 24.0 °C.")
@@ -421,7 +421,7 @@ class HybridAnomalyDetector:
                 warnings.append(f"Missing coolant temperature reading at '{ts_str}'; imputed baseline 24.0 °C.")
 
             # Tool cycles
-            val_cycles = item.get("tool_usage_cycles", item.get("tool_cycles"))
+            val_cycles = item.get("tool_usage_cycles") if item.get("tool_usage_cycles") is not None else (item.get("tool_cycles") if item.get("tool_cycles") is not None else item.get("tool_wear_cycles"))
             item["tool_usage_cycles"] = _clean_int(val_cycles, 600)
 
             # Spindle speed

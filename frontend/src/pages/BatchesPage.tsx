@@ -26,6 +26,7 @@ import {
 
 interface Props {
   onNavigate: (page: string) => void;
+  onSelectWorkflow?: (workflowId: string) => void;
 }
 
 type Role = "admin" | "quality_engineer" | "operator";
@@ -56,7 +57,7 @@ const INITIAL_FORM: BatchFormData = {
   status: "IN_PROGRESS",
 };
 
-export const BatchesPage: React.FC<Props> = ({ onNavigate }) => {
+export const BatchesPage: React.FC<Props> = ({ onNavigate, onSelectWorkflow }) => {
   const [batches, setBatches] = useState<ProductionBatch[]>([]);
   const [products, setProducts] = useState<ProductSpec[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
@@ -323,12 +324,22 @@ export const BatchesPage: React.FC<Props> = ({ onNavigate }) => {
         disposition: result.status || "EVALUATED",
         timestamp: new Date().toLocaleTimeString(),
       });
-      setSuccessMessage(`Analysis completed successfully for batch ${batchId}.`);
+      setSuccessMessage(`Analysis completed successfully for batch ${batchId}. Navigating to AI Review...`);
       setFlashSuccessBatch(batchId);
       setTimeout(() => setFlashSuccessBatch(null), 1200);
       // Refresh list to pick up any status changes
       const updated = await api.getBatches();
       setBatches(updated);
+
+      if (result?.workflow_id) {
+        setTimeout(() => {
+          if (onSelectWorkflow) {
+            onSelectWorkflow(result.workflow_id);
+          } else {
+            onNavigate("ai-review");
+          }
+        }, 700);
+      }
     } catch (err: any) {
       setFlashErrorBatch(batchId);
       setTimeout(() => setFlashErrorBatch(null), 1200);
@@ -336,6 +347,23 @@ export const BatchesPage: React.FC<Props> = ({ onNavigate }) => {
     } finally {
       setRunningAnalysisBatch(null);
     }
+  };
+
+  const handleInspectBatchAnalysis = async (batchId: string) => {
+    try {
+      const wf = await api.getLatestWorkflowForBatch(batchId);
+      if (wf?.workflow_id) {
+        if (onSelectWorkflow) {
+          onSelectWorkflow(wf.workflow_id);
+        } else {
+          onNavigate("ai-review");
+        }
+        return;
+      }
+    } catch {
+      // If no workflow found yet, run analysis
+    }
+    handleRunAiAnalysis(batchId);
   };
 
   // Filter batches locally for search and selected dropdowns
@@ -560,7 +588,11 @@ export const BatchesPage: React.FC<Props> = ({ onNavigate }) => {
                   >
                     {/* Batch ID */}
                     <td className="px-4 py-3.5 font-semibold">
-                      <span className="batch-link font-tabular">
+                      <span
+                        onClick={() => handleInspectBatchAnalysis(b.batch_id)}
+                        className="batch-link font-tabular cursor-pointer hover:underline text-blue-600 hover:text-blue-800"
+                        title="Click to view full AI execution trace and inspection findings"
+                      >
                         {b.batch_id}
                       </span>
                     </td>

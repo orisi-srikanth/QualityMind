@@ -12,13 +12,14 @@ interface Props {
   onRunPipeline: () => void;
   isRunningPipeline: boolean;
   userRole?: string;
+  workflowId?: string;
 }
 
-export const AiReviewPage: React.FC<Props> = ({ onRunPipeline, isRunningPipeline, userRole = "quality_engineer" }) => {
+export const AiReviewPage: React.FC<Props> = ({ onRunPipeline, isRunningPipeline, userRole = "quality_engineer", workflowId }) => {
   const [workflowState, setWorkflowState] = useState<WorkflowState | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"overview" | "trace" | "models" | "evidence" | "hypotheses" | "critic" | "decision">("overview");
-  const [workflowIdInput, setWorkflowIdInput] = useState("WF-C038A990");
+  const [workflowIdInput, setWorkflowIdInput] = useState(workflowId || "WF-C038A990");
   const [engineerName, setEngineerName] = useState("Sarah Chen, Lead Quality Engineer");
   const [disposition, setDisposition] = useState("QUARANTINE_BATCH");
   const [comments, setComments] = useState("Confirmed cutting tool flank wear via toolmakers microscope (VB max 0.38mm). Quarantining batch BATCH-0245 for 100% sorting inspection.");
@@ -94,8 +95,13 @@ export const AiReviewPage: React.FC<Props> = ({ onRunPipeline, isRunningPipeline
   };
 
   useEffect(() => {
-    loadWorkflow("WF-C038A990");
-  }, []);
+    if (workflowId) {
+      setWorkflowIdInput(workflowId);
+      loadWorkflow(workflowId);
+    } else {
+      loadWorkflow(workflowIdInput || "WF-C038A990");
+    }
+  }, [workflowId]);
 
   const triggerSignOff = (decision: string) => {
     if (isOperator) {
@@ -112,15 +118,26 @@ export const AiReviewPage: React.FC<Props> = ({ onRunPipeline, isRunningPipeline
     setShowConfirmModal(false);
 
     try {
-      const res = await api.submitHumanDecision({
-        approved_by: engineerName,
-        decision: dec,
-        engineering_comments: comments,
-        disposition: disposition,
-        confirmed_root_cause: "Progressive Cutting Tool Flank Wear on CNC-04",
-      });
+      let res: any;
+      if (workflowState?.workflow_id) {
+        res = await api.submitWorkflowDecision(workflowState.workflow_id, {
+          approved_by: engineerName,
+          decision: dec,
+          engineering_comments: comments,
+          disposition: disposition,
+          confirmed_root_cause: "Progressive Cutting Tool Flank Wear on CNC-04",
+        });
+      } else {
+        res = await api.submitHumanDecision({
+          approved_by: engineerName,
+          decision: dec,
+          engineering_comments: comments,
+          disposition: disposition,
+          confirmed_root_cause: "Progressive Cutting Tool Flank Wear on CNC-04",
+        });
+      }
       setSubmitted(true);
-      alert(`Human Decision Recorded: ${res.decision}. Disposition: ${res.disposition}`);
+      alert(`Human Decision Recorded: ${res.decision}. Disposition: ${res.disposition || disposition}`);
       loadHistory();
       // Reload current workflow state to reflect human decision
       if (workflowState?.workflow_id) {

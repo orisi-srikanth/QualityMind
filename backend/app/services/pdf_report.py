@@ -680,3 +680,14 @@ def generate_quality_pdf_report(state_data: Dict[str, Any], output_path: Optiona
     pdf_bytes = buffer.getvalue()
     buffer.close()
     return pdf_bytes
+
+
+class PDFReportGenerator:
+    """Wrapper class providing generate_audit_report method returning io.BytesIO buffer."""
+    def generate_audit_report(self, state_data: Dict[str, Any]) -> io.BytesIO:
+        pdf_bytes = generate_quality_pdf_report(state_data)
+        return io.BytesIO(pdf_bytes)
+
+
+pdf_report_generator = PDFReportGenerator()
+

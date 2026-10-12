@@ -35,3 +35,9 @@ class WorkflowState(BaseModel):
     product_mismatch: bool = False
     product_mismatch_warning: Optional[str] = None
     completed_at: Optional[str] = None
+
+    # Stage statuses and workflow control
+    stage_statuses: Dict[str, str] = Field(default_factory=dict)
+    reassessment_loops: int = 0
+    effectiveness_report: Optional[Dict[str, Any]] = None
+    report_id: Optional[str] = None

@@ -68,6 +68,14 @@ def start_workflow(batch_id: str = "BATCH-0245"):
     return state
 
 
+@router.get("/workflows/batch/{batch_id}", tags=["Workflows (Agents)"], summary="Retrieve latest workflow state for a batch", description="Retrieves the most recent workflow execution state for a given batch from memory or persisted SQLite checkpoints.")
+def get_batch_latest_workflow(batch_id: str):
+    wf = orchestrator.get_latest_workflow_for_batch(batch_id)
+    if not wf:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No execution workflow found for batch {batch_id}")
+    return wf
+
+
 @router.get("/workflows/{workflow_id}", tags=["Workflows (Agents)"], summary="Retrieve workflow execution state", description="Retrieves state, agent outputs, and pause gate status for specified workflow.")
 def get_workflow_state(workflow_id: str):
     wf = orchestrator.get_workflow(workflow_id)
@@ -79,6 +87,7 @@ def get_workflow_state(workflow_id: str):
             workflow_id=workflow_id
         )
     return wf
+
 
 
 @router.get("/workflows/{workflow_id}/trace", tags=["Workflows (Agents)"], summary="Retrieve multi-agent execution trace", description="Returns detailed agent execution step logs, timestamps, and input/output summaries.")

@@ -443,6 +443,13 @@ export const api = {
     return res.json();
   },
 
+  getLatestWorkflowForBatch: async (batchId: string): Promise<WorkflowState> => {
+    const res = await fetch(`${API_BASE}/workflows/batch/${encodeURIComponent(batchId)}`);
+    if (!res.ok) throw new Error(`No workflow found for batch ${batchId}`);
+    return res.json();
+  },
+
+
   getWorkflowTrace: async (workflowId: string): Promise<AgentStepLog[]> => {
     const res = await fetch(`${API_BASE}/workflows/${encodeURIComponent(workflowId)}/trace`);
     return res.json();
