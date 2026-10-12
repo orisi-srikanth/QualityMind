@@ -56,6 +56,16 @@ UNIFIED_CLASSES = SHAFT_CLASSES
 PROXY_CATEGORIES = ["metal_nut", "screw", "transistor", "cable"]
 SUPPORTED_CATEGORIES = ["precision_shaft", "shaft"] + PROXY_CATEGORIES
 
+PRODUCT_CATEGORIES = [
+    "screw",
+    "metal_nut",
+    "cable",
+    "transistor",
+    "precision_shaft"
+]
+CATEGORY_TO_IDX = {cat: i for i, cat in enumerate(PRODUCT_CATEGORIES)}
+IDX_TO_CATEGORY = {i: cat for i, cat in enumerate(PRODUCT_CATEGORIES)}
+
 CATEGORY_CLASSES = {
     "screw": ["no_defect", "scratch_head", "thread_damage", "neck_dent"],
     "metal_nut": ["no_defect", "scratch", "bent", "color", "flip"],
@@ -63,6 +73,117 @@ CATEGORY_CLASSES = {
     "transistor": ["no_defect", "damaged_case", "misplaced", "cut_lead", "bent_lead"],
     "precision_shaft": ["no_defect", "surface_scratch", "dent", "crack", "missing_feature", "incorrect_assembly"]
 }
+
+import torch
+import torch.nn as nn
+import torchvision.models as models
+
+
+class MultiProductModel(nn.Module):
+    """
+    MobileNetV3-Small backbone with two-stage multi-task heads:
+    1. Product Recognition Head: classifies visual product domain (screw, nut, etc.)
+    2. Category Defect Heads: specialized classifier for each product
+    """
+    def __init__(self, pretrained: bool = False):
+        super().__init__()
+        weights = models.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        base = models.mobilenet_v3_small(weights=weights)
+        self.features = base.features
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        in_features = 576
+
+        # Product Classifier Head
+        self.product_head = nn.Sequential(
+            nn.Linear(in_features, 256),
+            nn.Hardswish(),
+            nn.Dropout(p=0.2),
+            nn.Linear(256, len(PRODUCT_CATEGORIES))
+        )
+
+        # Defect Classifier Heads
+        self.defect_heads = nn.ModuleDict({
+            cat: nn.Sequential(
+                nn.Linear(in_features, 128),
+                nn.Hardswish(),
+                nn.Dropout(p=0.2),
+                nn.Linear(128, len(classes))
+            )
+            for cat, classes in CATEGORY_CLASSES.items()
+        })
+
+    def forward(self, x: torch.Tensor, category: Optional[str] = None) -> Tuple[torch.Tensor, torch.Tensor, str]:
+        feat = self.features(x)
+        pooled = self.avgpool(feat)
+        flat = torch.flatten(pooled, 1)
+
+        product_logits = self.product_head(flat)
+        if category is None or category not in self.defect_heads:
+            pred_cat_idx = int(torch.argmax(product_logits, dim=1)[0].item())
+            category = PRODUCT_CATEGORIES[pred_cat_idx]
+
+        defect_logits = self.defect_heads[category](flat)
+        return product_logits, defect_logits, category
+
+    def extract_embedding(self, x: torch.Tensor) -> torch.Tensor:
+        feat = self.features(x)
+        pooled = self.avgpool(feat)
+        return torch.flatten(pooled, 1)
+
+
+class DefectClassifier(nn.Module):
+    """MobileNetV3-Small backbone with fine-tuned defect classification head."""
+    def __init__(self, num_classes: int = len(SHAFT_CLASSES), pretrained: bool = False):
+        super().__init__()
+        weights = models.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        base = models.mobilenet_v3_small(weights=weights)
+        self.features = base.features
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        in_features = base.classifier[0].in_features  # 576
+        self.classifier = nn.Sequential(
+            nn.Linear(in_features, 256),
+            nn.Hardswish(),
+            nn.Dropout(p=0.2),
+            nn.Linear(256, num_classes)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
+
+
+class GradCAM:
+    """Computes class-activation maps for interpretability and bounding box localization without backward graphs."""
+    def __init__(self, model: DefectClassifier, target_layer: Optional[nn.Module] = None):
+        self.model = model
+        self.target_layer = target_layer if target_layer is not None else model.features[-1]
+        self.activations = None
+        self.target_layer.register_forward_hook(self._forward_hook)
+
+    def _forward_hook(self, module, inp, outp):
+        self.activations = outp
+
+    def generate(self, input_tensor: torch.Tensor, class_idx: int) -> np.ndarray:
+        self.model.eval()
+        try:
+            with torch.no_grad():
+                _ = self.model(input_tensor)
+                if self.activations is not None:
+                    acts = self.activations.detach()
+                    cam = torch.mean(torch.relu(acts), dim=1).squeeze().cpu().numpy()
+                else:
+                    cam = np.zeros((16, 16), dtype=np.float32)
+        except Exception:
+            cam = np.zeros((16, 16), dtype=np.float32)
+
+        cam = np.maximum(cam, 0)
+        if np.max(cam) > 0:
+            cam = cam / np.max(cam)
+        cam = cv2.resize(cam, (512, 512))
+        return cam
 
 
 class MultiProductGradCAM:
@@ -77,7 +198,6 @@ class MultiProductGradCAM:
         self.activations = outp
 
     def generate(self, input_tensor: Any, category: str, class_idx: int) -> np.ndarray:
-        import torch
         self.model.eval()
         try:
             with torch.no_grad():
@@ -128,7 +248,6 @@ class TwoStageDefectInspector:
     def _ensure_initialized(self):
         if self._initialized:
             return
-        import torch
         import torchvision.transforms as transforms
         self.device = torch.device("cpu")
         self.clf_transform = transforms.Compose([
@@ -140,9 +259,6 @@ class TwoStageDefectInspector:
         self._initialized = True
 
     def _initialize_models(self):
-        import torch
-        from ml.cv.train_classifier import DefectClassifier, GradCAM
-
         # 0. Load Fine-Tuned Multi-Product Model
         mp_path = self.models_dir / "multiproduct_cv_model.pt"
         if not mp_path.exists():
@@ -152,7 +268,6 @@ class TwoStageDefectInspector:
 
         if mp_path.exists():
             try:
-                from ml.cv.train_multiproduct_finetuning import MultiProductModel
                 self.multiproduct_model = MultiProductModel().to(self.device)
                 self.multiproduct_model.load_state_dict(torch.load(mp_path, map_location=self.device))
                 self.multiproduct_model.eval()
@@ -244,7 +359,6 @@ class TwoStageDefectInspector:
                     prod_logits = self.multiproduct_model.product_head(feat)
                     probs = F.softmax(prod_logits, dim=1).squeeze().cpu().numpy()
                     pred_cat_idx = int(np.argmax(probs))
-                    from ml.cv.train_multiproduct_finetuning import PRODUCT_CATEGORIES
                     if 0 <= pred_cat_idx < len(PRODUCT_CATEGORIES):
                         pred_cat = PRODUCT_CATEGORIES[pred_cat_idx]
                         pred_prob = float(probs[pred_cat_idx])

@@ -6,6 +6,25 @@ Serves unified REST API, Static inspection media, and Production React Frontend.
 import os
 import sys
 
+# Constrain thread count for low-core cloud containers (Render 0.1 vCPU / 512MB RAM)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+try:
+    import cv2
+    cv2.setNumThreads(1)
+except Exception:
+    pass
+
+try:
+    import torch
+    torch.set_num_threads(1)
+except Exception:
+    pass
+
 # Ensure both repo root and backend directory are in sys.path
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _backend_dir = os.path.dirname(_current_dir)
