@@ -407,35 +407,17 @@ class EffectivenessEngine:
                         "product": target_product_id
                     }
 
-                    # Check if check already exists (prevent duplicate rows on re-run, keep history when new batches arrive)
-                    existing_check = db.query(EffectivenessCheck).filter(
-                        EffectivenessCheck.capa_id == action.id
-                    ).order_by(EffectivenessCheck.id.desc()).first()
-
-                    same_data = (
-                        existing_check is not None and
-                        existing_check.rejection_rate_before == p1_pct and
-                        existing_check.rejection_rate_after == p2_pct and
-                        existing_check.test_used == test_type and
-                        abs(existing_check.p_value - round(p_value, 6)) < 1e-5
-                    )
+                    # Check if matching check already exists with same data for this CAPA action
+                    existing_check = None
+                    if not force_recompute:
+                        existing_check = db.query(EffectivenessCheck).filter(
+                            EffectivenessCheck.capa_id == action.id,
+                            EffectivenessCheck.rejection_rate_before == p1_pct,
+                            EffectivenessCheck.rejection_rate_after == p2_pct,
+                            EffectivenessCheck.test_used == test_type
+                        ).first()
 
                     if not existing_check:
-                        chk = EffectivenessCheck(
-                            id=gen_uuid(),
-                            capa_id=action.id,
-                            window_before_json=json.dumps(window_before_data),
-                            window_after_json=json.dumps(window_after_data),
-                            rejection_rate_before=p1_pct,
-                            rejection_rate_after=p2_pct,
-                            test_used=test_type,
-                            p_value=round(p_value, 6),
-                            conclusion_label=conclusion_label,
-                            notes=confounding_explanations
-                        )
-                        db.add(chk)
-                    elif force_recompute or not same_data:
-                        # New batches arrived or forced recompute: append new check so previous history is kept
                         chk = EffectivenessCheck(
                             id=gen_uuid(),
                             capa_id=action.id,

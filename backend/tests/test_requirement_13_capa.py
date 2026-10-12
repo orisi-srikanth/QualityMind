@@ -308,7 +308,7 @@ def test_check_5_field_rules_and_evidence_requirements(qe_headers):
 # ---------------------------------------------------------------------------
 # Check 6: Tracking, Overdue & Recurrence Detector
 # ---------------------------------------------------------------------------
-def test_check_6_tracking_overdue_and_recurrence_detector(db: Session):
+def test_check_6_tracking_overdue_and_recurrence_detector(db: Session, qe_headers):
     """Verifies overdue calculation, dashboard KPI parity with database queries, and recurrence detection."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -320,7 +320,7 @@ def test_check_6_tracking_overdue_and_recurrence_detector(db: Session):
     ).count()
 
     # Dashboard summary
-    dash_res = client.get("/api/dashboard/summary")
+    dash_res = client.get("/api/dashboard/summary", headers=qe_headers)
     assert dash_res.status_code == 200
     dash_data = dash_res.json()
 

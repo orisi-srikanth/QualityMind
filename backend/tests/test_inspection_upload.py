@@ -22,8 +22,48 @@ Tests all 17 mandated scenarios:
 import pytest
 from fastapi.testclient import TestClient
 from backend.app.main import app
+from backend.app.core.security import create_access_token, UserRole
 
 client = TestClient(app)
+_token = create_access_token({"sub": "operator@precisionaero.com", "role": UserRole.OPERATOR.value})
+client.headers["Authorization"] = f"Bearer {_token}"
+
+@pytest.fixture(scope="module", autouse=True)
+def restore_batch_0245_measurements():
+    yield
+    from backend.app.database.session import SessionLocal
+    from backend.app.database.models import Batch, Measurement, InspectionCharacteristic
+    db = SessionLocal()
+    try:
+        b = db.query(Batch).filter(Batch.batch_number == "BATCH-0245").first()
+        if b:
+            char = db.query(InspectionCharacteristic).filter(InspectionCharacteristic.product_id == b.product_id).first()
+            char_id = char.id if char else "char-ps-dia-01"
+            db.query(Measurement).filter(Measurement.batch_id == b.id).delete()
+            golden = [
+                ("P001", 50.01, "conforming", 0.0),
+                ("P002", 50.03, "conforming", 0.0),
+                ("P003", 50.06, "nonconforming", 0.01),
+                ("P004", 50.08, "nonconforming", 0.03),
+                ("P005", 50.07, "nonconforming", 0.02),
+            ]
+            for comp_id, val, st, dev in golden:
+                db.add(Measurement(
+                    batch_id=b.id,
+                    characteristic_id=char_id,
+                    component_id=comp_id,
+                    value=val,
+                    unit="mm",
+                    status=st,
+                    deviation_from_limit=dev,
+                    source_type="csv",
+                    file_name="benchmark_5_parts.csv",
+                    uploaded_by="quality_engineer@precisionaero.com"
+                ))
+            db.commit()
+    finally:
+        db.close()
+
 
 def test_1_valid_five_row_benchmark_csv():
     """Upload valid 5-row CSV and verify successful status and schema."""

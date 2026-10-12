@@ -350,7 +350,7 @@ def seed_database():
                 ("inc-008", "BATCH-0012", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 9, 3, 8, 45, tzinfo=timezone.utc), "Thermal Expansion of Workpiece"),
                 ("inc-009", "BATCH-0003", "Oversized shaft diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc), "Progressive Tool Flank Wear"),
                 ("inc-010", "BATCH-0001", "Undersized bore diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 12, 15, 30, tzinfo=timezone.utc), "Thermal Expansion of Workpiece"),
-                ("inc-011", "BATCH-0004", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 18, 10, 0, tzinfo=timezone.utc), "Coolant Chip Recirculation"),
+                ("inc-011", "BATCH-0005", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 18, 10, 0, tzinfo=timezone.utc), "Coolant Chip Recirculation"),
                 ("inc-012", "BATCH-0007", "Undersized bore diameter", "Dimensional Out of Tolerance", "HIGH", datetime(2026, 8, 24, 17, 0, tzinfo=timezone.utc), "Thermal Expansion of Workpiece"),
                 ("inc-013", "BATCH-0010", "Surface scratch / score", "Surface Finish Defect", "MEDIUM", datetime(2026, 8, 30, 14, 15, tzinfo=timezone.utc), "Coolant Chip Recirculation"),
                 ("inc-014", "BATCH-0002", "Flange thickness deviation", "Geometric Runout", "MEDIUM", datetime(2026, 8, 14, 11, 0, tzinfo=timezone.utc), "Loose Collet Fixturing"),

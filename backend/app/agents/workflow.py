@@ -244,6 +244,7 @@ def node_capa(state: QualityWorkflowGraphState) -> Dict[str, Any]:
     trace.append(res["log"].model_dump())
     
     return {
+        "status": "DISPOSITION_READY",
         "current_agent": capa_agent.name,
         "capa_report": rep,
         "execution_trace": trace

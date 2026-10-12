@@ -28,47 +28,57 @@ def get_telemetry(
     machine: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    if not machine:
-        b = db.query(Batch).filter((Batch.batch_number == batch_id) | (Batch.id == batch_id)).first()
-        if b and b.machine:
-            machine = b.machine.code
-        elif b and b.machine_id:
-            machine = b.machine_id
-        else:
-            machine = "CNC-04"
+    try:
+        if not machine:
+            b = db.query(Batch).filter((Batch.batch_number == batch_id) | (Batch.id == batch_id)).first()
+            if b and b.machine:
+                machine = b.machine.code
+            elif b and b.machine_id:
+                machine = b.machine_id
+            else:
+                machine = "CNC-04"
 
-    res = process_agent.analyze_telemetry_series(batch_id=batch_id, machine=machine)
+        res = process_agent.analyze_telemetry_series(batch_id=batch_id, machine=machine)
 
-    # Format baselines dictionary with units and thresholds
-    baselines_payload = {}
-    for p_key, meta in OPERATIONAL_THRESHOLDS.items():
-        base_rec = db.query(ProcessBaseline).filter(
-            (ProcessBaseline.parameter == p_key) &
-            ((ProcessBaseline.machine_id == machine) | (ProcessBaseline.machine_id == f"mach-0{machine[-1]}" if machine.startswith("CNC-") else True))
-        ).first()
+        # Format baselines dictionary with units and thresholds
+        baselines_payload = {}
+        for p_key, meta in OPERATIONAL_THRESHOLDS.items():
+            try:
+                base_rec = db.query(ProcessBaseline).filter(
+                    (ProcessBaseline.parameter == p_key) &
+                    ((ProcessBaseline.machine_id == machine) | (ProcessBaseline.machine_id == f"mach-0{machine[-1]}" if (machine and machine.startswith("CNC-")) else True))
+                ).first()
+            except Exception:
+                base_rec = None
 
-        baselines_payload[p_key] = {
-            "name": meta["name"],
-            "unit": meta["unit"],
-            "mean": base_rec.mean if base_rec else meta["nominal"],
-            "std": base_rec.std if base_rec else 0.1,
-            "warn_limit": meta.get("warn", meta.get("warn_high", 0.0)),
-            "trip_limit": meta.get("critical", meta.get("critical_high", 0.0)),
-            "source": meta["source"]
+            baselines_payload[p_key] = {
+                "name": meta["name"],
+                "unit": meta["unit"],
+                "mean": base_rec.mean if base_rec else meta["nominal"],
+                "std": base_rec.std if base_rec else 0.1,
+                "warn_limit": meta.get("warn", meta.get("warn_high", 0.0)),
+                "trip_limit": meta.get("critical", meta.get("critical_high", 0.0)),
+                "source": meta["source"]
+            }
+
+        return {
+            "batch_id": batch_id,
+            "machine": machine,
+            "report": res.get("report", ""),
+            "data_points": res.get("telemetry_points", []),
+            "baselines": baselines_payload,
+            "trends": res.get("trends", {}),
+            "changed_vs_unchanged": res.get("changed_vs_unchanged", []),
+            "anomalies": res.get("anomalies", []),
+            "warnings": res.get("warnings", []),
+            "log": res.get("log", "")
         }
-
-    return {
-        "batch_id": batch_id,
-        "machine": machine,
-        "report": res["report"],
-        "data_points": res["telemetry_points"],
-        "baselines": baselines_payload,
-        "trends": res.get("trends", {}),
-        "changed_vs_unchanged": res.get("changed_vs_unchanged", []),
-        "anomalies": res.get("anomalies", []),
-        "warnings": res.get("warnings", []),
-        "log": res["log"]
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn.error").error(f"Error fetching telemetry for {batch_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve telemetry: {str(e)}")
 
 @router.get(
     "/process/anomalies",

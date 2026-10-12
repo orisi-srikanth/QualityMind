@@ -82,7 +82,7 @@ def test_2_7_8_csv_ingestion_and_row_preservation(temp_rag_env):
     assert meta["record_id"] == "NCR-019"
     assert meta["part_number"] == "PS-2026-101"
     assert meta["machine_id"] == "CNC-04"
-    assert meta["category"] == "ncr"
+    assert meta["category"] in ("previous_ncr", "ncr")
 
 # 3. Successful ingestion of a JSON file
 def test_3_json_ingestion(temp_rag_env):

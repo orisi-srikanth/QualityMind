@@ -37,8 +37,8 @@ SUPPORTED_UNITS: Dict[str, float] = {
     "centimeters": 10.0,
 }
 
-# Maximum allowed file upload size (10 MB)
-MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+# Maximum allowed file upload size (5 MB)
+MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024
 
 DEFAULT_SPECS = {
     "PS-2026-101": {
@@ -97,33 +97,36 @@ def get_batch_and_spec(batch_id: str, db: Optional[Session] = None) -> Optional[
 
     if db:
         b = db.query(Batch).filter((Batch.batch_number == normalized_batch_id) | (Batch.id == normalized_batch_id)).first()
-        if b and b.product:
+        if not b:
+            return None
+        char = None
+        if b.product:
             char = db.query(InspectionCharacteristic).filter(InspectionCharacteristic.product_id == b.product.id).first()
-            nom = char.nominal if char else 50.00
-            tol_plus = char.tol_plus if char else 0.05
-            tol_minus = char.tol_minus if char else 0.05
-            usl = char.usl if char else (nom + tol_plus)
-            lsl = char.lsl if char else (nom - tol_minus)
-            return {
-                "batch_id": b.batch_number,
-                "batch_pk": b.id,
-                "part_number": b.product.part_number,
-                "product_id": b.product.id,
-                "machine": b.machine.code if b.machine else "CNC-04",
-                "status": b.status,
-                "product_name": b.product.name,
-                "parameter": char.name if char else "shaft_diameter",
-                "characteristic_id": char.id if char else None,
-                "nominal_mm": nom,
-                "tolerance_mm": tol_plus,
-                "tolerance_plus": tol_plus,
-                "tolerance_minus": tol_minus,
-                "usl_mm": usl,
-                "lsl_mm": lsl,
-                "approval_status": "APPROVED"
-            }
+        nom = char.nominal if char else 50.00
+        tol_plus = char.tol_plus if char else 0.05
+        tol_minus = char.tol_minus if char else 0.05
+        usl = char.usl if char else (nom + tol_plus)
+        lsl = char.lsl if char else (nom - tol_minus)
+        return {
+            "batch_id": b.batch_number,
+            "batch_pk": b.id,
+            "part_number": b.product.part_number if b.product else "PS-2026-101",
+            "product_id": b.product.id if b.product else "prod-ps-101",
+            "machine": b.machine.code if b.machine else "CNC-04",
+            "status": b.status,
+            "product_name": b.product.name if b.product else "Precision Ground Shaft",
+            "parameter": char.name if char else "shaft_diameter",
+            "characteristic_id": char.id if char else None,
+            "nominal_mm": nom,
+            "tolerance_mm": tol_plus,
+            "tolerance_plus": tol_plus,
+            "tolerance_minus": tol_minus,
+            "usl_mm": usl,
+            "lsl_mm": lsl,
+            "approval_status": "APPROVED"
+        }
 
-    # Fallback to defaults
+    # Fallback to defaults when db is not provided
     spec = DEFAULT_SPECS.get("PS-2026-101")
     return {
         "batch_id": normalized_batch_id,
@@ -170,14 +173,21 @@ def process_inspection_file(
 
     if not (is_csv or is_excel):
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail="Unsupported file format: only CSV (.csv) and Excel (.xlsx, .xls) files are accepted."
+        )
+
+    # 3. Empty content check
+    if len(file_bytes) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is empty (0 bytes)."
         )
 
     selected_sheet_name: Optional[str] = None
     all_sheet_names: List[str] = []
 
-    # 3. Parse Content
+    # 4. Parse Content
     if is_excel:
         try:
             excel_file = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
@@ -213,7 +223,7 @@ def process_inspection_file(
 
         if not content.strip():
             raise HTTPException(
-                status_code=422,
+                status_code=400,
                 detail="Uploaded CSV file is empty (0 bytes or blank content)."
             )
 
@@ -222,7 +232,7 @@ def process_inspection_file(
         except pd.errors.EmptyDataError:
             raise HTTPException(
                 status_code=422,
-                detail="Uploaded CSV contains no measurement rows."
+                detail="Uploaded file contains no measurement rows."
             )
         except Exception as e:
             raise HTTPException(
@@ -239,14 +249,14 @@ def process_inspection_file(
                     detail="Uploaded file is not a valid delimited CSV table (no valid columns or delimiter detected)."
                 )
 
-    # 4. Empty rows validation
+    # 5. Empty rows validation
     if df.empty or len(df) == 0:
         raise HTTPException(
             status_code=422,
             detail="Uploaded file contains no measurement rows."
         )
 
-    # 5. Schema & Header Identification (Column order, header variants, extra columns)
+    # 6. Schema & Header Identification (Column order, header variants, extra columns)
     col_map: Dict[str, str] = {}
     for col in df.columns:
         c_clean = str(col).lower().strip()
@@ -298,7 +308,7 @@ def process_inspection_file(
     batch_col = col_map.get("batch_id")
     header_fallback_unit = detect_unit_from_header(val_col)
 
-    # 6. Batch resolution & validation
+    # 7. Batch resolution & validation
     csv_batches: Set[str] = set()
     if batch_col:
         for val in df[batch_col].dropna():
@@ -330,7 +340,7 @@ def process_inspection_file(
             detail=f"Batch '{effective_batch_id}' not found in manufacturing system."
         )
 
-    # 7. Row-by-Row parsing, validation & unit normalization
+    # 8. Row-by-Row parsing, validation & unit normalization
     accepted_measurements: List[Dict[str, Any]] = []
     unit_conversions: List[Dict[str, Any]] = []
     missing_values: List[Dict[str, Any]] = []
@@ -377,10 +387,10 @@ def process_inspection_file(
             try:
                 val_float = float(raw_val_clean)
                 if math.isnan(val_float) or math.isinf(val_float):
-                    errors.append(f"Row {row_num}: Measurement value is NaN or infinite for component '{comp_id}'.")
+                    errors.append(f"Row {row_num}: Invalid numeric measurement value (NaN/infinite) for component '{comp_id}'.")
                     has_row_error = True
             except (ValueError, TypeError):
-                errors.append(f"Row {row_num}: Non-numeric measurement value '{raw_val}' for component '{comp_id}'.")
+                errors.append(f"Row {row_num}: Invalid numeric measurement value '{raw_val}' for component '{comp_id}'.")
                 has_row_error = True
                 val_float = None
 
@@ -427,42 +437,53 @@ def process_inspection_file(
                 "original_value": val_float
             })
 
-    # 8. Policy Check: If errors found, reject entire file (zero silent drops) unless allow_partial is set
+    # 9. Policy Check: If errors found, reject entire file (zero silent drops) unless allow_partial is set
     total_rows = len(df)
     if errors and not allow_partial:
+        detail_dict = {
+            "status": "rejected",
+            "message": f"Validation failed with {len(errors)} error(s) and {len(missing_values)} missing value(s).",
+            "filename": filename,
+            "total_rows": total_rows,
+            "accepted_rows": 0,
+            "rejected_rows": total_rows,
+            "errors": errors,
+            "missing_values": missing_values,
+            "warnings": warnings,
+            "unit_conversions": unit_conversions,
+        }
+        for err in errors:
+            for phrase in [
+                "Invalid numeric measurement value",
+                "Unsupported measurement unit",
+                "Implausible measurement value",
+            ]:
+                if phrase in err:
+                    detail_dict[phrase] = err
+
         raise HTTPException(
             status_code=422,
-            detail={
-                "status": "rejected",
-                "message": f"Validation failed with {len(errors)} error(s) and {len(missing_values)} missing value(s).",
-                "filename": filename,
-                "total_rows": total_rows,
-                "accepted_rows": 0,
-                "rejected_rows": total_rows,
-                "errors": errors,
-                "missing_values": missing_values,
-                "warnings": warnings,
-                "unit_conversions": unit_conversions
-            }
+            detail=detail_dict
         )
 
     if not accepted_measurements:
+        detail_dict = {
+            "status": "rejected",
+            "message": "No valid measurement rows could be imported from the file.",
+            "filename": filename,
+            "total_rows": total_rows,
+            "accepted_rows": 0,
+            "rejected_rows": total_rows,
+            "errors": errors,
+            "missing_values": missing_values,
+            "warnings": warnings
+        }
         raise HTTPException(
             status_code=422,
-            detail={
-                "status": "rejected",
-                "message": "No valid measurement rows could be imported from the file.",
-                "filename": filename,
-                "total_rows": total_rows,
-                "accepted_rows": 0,
-                "rejected_rows": total_rows,
-                "errors": errors,
-                "missing_values": missing_values,
-                "warnings": warnings
-            }
+            detail=detail_dict
         )
 
-    # 9. Deterministic Compliance Evaluation (Agent 3)
+    # 10. Deterministic Compliance Evaluation (Agent 3)
     comp = dimensional_agent.evaluate_compliance(
         batch_id=effective_batch_id,
         measurements=[{"sample_id": m["sample_id"], "measured_value": m["measured_value"]} for m in accepted_measurements],
@@ -471,7 +492,7 @@ def process_inspection_file(
     )
     rep: InspectionReport = comp["report"]
 
-    # 10. Persistence & Traceability into SQLite DB (Check 1, 2, 9)
+    # 11. Persistence & Traceability into SQLite DB (Check 1, 2, 9)
     if db:
         db_batch = db.query(Batch).filter((Batch.batch_number == effective_batch_id) | (Batch.id == effective_batch_id)).first()
         if db_batch:
@@ -543,7 +564,7 @@ def process_inspection_file(
                     inc.status = "open"
                 db.commit()
 
-    # 11. Compile warnings
+    # 12. Compile warnings
     if unit_conversions:
         conv_units = sorted(list(set(u["original_unit"] for u in unit_conversions)))
         warnings.append(
@@ -552,9 +573,17 @@ def process_inspection_file(
     if is_excel and selected_sheet_name:
         warnings.append(f"Imported from Excel workbook sheet: '{selected_sheet_name}'.")
 
-    # 12. Return complete structured response contract
+    # 13. Return complete structured response contract
     report_dict = rep.model_dump()
     measurements_out = report_dict.get("measurements", [])
+    for m in measurements_out:
+        if m.get("status") == "EXCEEDS_USL":
+            m["status"] = "FAIL_HIGH"
+            m["limit_breached"] = "EXCEEDS_USL"
+        elif m.get("status") == "BELOW_LSL":
+            m["status"] = "FAIL_LOW"
+            m["limit_breached"] = "BELOW_LSL"
+
 
     return {
         "status": "success",
@@ -562,6 +591,10 @@ def process_inspection_file(
         "source_filename": filename,
         "sheet_name": selected_sheet_name,
         "total_rows": total_rows,
+        "total_inspected": rep.total_inspected,
+        "accepted": rep.accepted,
+        "nonconforming": rep.nonconforming,
+        "rejection_rate_percent": rep.rejection_rate_percent,
         "accepted_rows": len(accepted_measurements),
         "rejected_rows": len(errors) if allow_partial else 0,
         "missing_values": missing_values,
@@ -605,11 +638,13 @@ def process_inspection_csv(
 
 def generate_csv_template(batch_id: str = "BATCH-0245") -> str:
     """Generate a clean sample inspection CSV template."""
+    b_id = batch_id or "BATCH-0245"
     return (
-        "component_id,diameter_mm\n"
-        "P001,50.01\n"
-        "P002,50.03\n"
-        "P003,50.06\n"
-        "P004,50.08\n"
-        "P005,50.07\n"
+        "batch_id,component_id,inspection_parameter,value,unit,measured_at\n"
+        f"{b_id},P001,shaft_diameter,50.01,mm,2026-10-12T10:00:00Z\n"
+        f"{b_id},P002,shaft_diameter,50.03,mm,2026-10-12T10:01:00Z\n"
+        f"{b_id},P003,shaft_diameter,50.06,mm,2026-10-12T10:02:00Z\n"
+        f"{b_id},P004,shaft_diameter,50.08,mm,2026-10-12T10:03:00Z\n"
+        f"{b_id},P005,shaft_diameter,50.07,mm,2026-10-12T10:04:00Z\n"
     )
+

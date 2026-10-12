@@ -26,8 +26,11 @@ from backend.app.main import app
 from backend.app.database.session import SessionLocal
 from backend.app.database.models import QualityIncident, RCAHypothesis, Batch, Machine, Product
 from backend.app.services.pareto import pareto_service
+from backend.app.core.security import create_access_token, UserRole
 
 client = TestClient(app)
+_token = create_access_token({"sub": "engineer@precisionaero.com", "role": UserRole.QUALITY_ENGINEER.value})
+client.headers["Authorization"] = f"Bearer {_token}"
 
 # =====================================================================
 # CHECK 1: Five Dimensions & Response Shapes

@@ -5,8 +5,11 @@ Tests all domain endpoints, auth, pareto, effectiveness, and HITL workflow decis
 import pytest
 from fastapi.testclient import TestClient
 from backend.app.main import app
+from backend.app.core.security import create_access_token, UserRole
 
 client = TestClient(app)
+_token = create_access_token({"sub": "engineer@precisionaero.com", "role": UserRole.QUALITY_ENGINEER.value, "name": "Sarah Chen"})
+client.headers["Authorization"] = f"Bearer {_token}"
 
 def test_api_health_and_version():
     res_health = client.get("/health")

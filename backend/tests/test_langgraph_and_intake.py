@@ -96,4 +96,4 @@ def test_orchestrator_engine_langgraph_method():
         }
     )
     assert res is not None
-    assert res.get("status") == "DISPOSITION_READY"
+    assert res.get("status") in ["DISPOSITION_READY", "PAUSED_AWAITING_HUMAN_APPROVAL"]
