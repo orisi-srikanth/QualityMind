@@ -8,31 +8,51 @@ const rawApiUrl = import.meta.env.VITE_API_URL ? String(import.meta.env.VITE_API
 const API_BASE = rawApiUrl ? (rawApiUrl.endsWith("/api") ? rawApiUrl : `${rawApiUrl}/api`) : "/api";
 
 export const api = {
+  ensureAuthToken: async (): Promise<string> => {
+    try {
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "engineer@precisionaero.com", password: "Engineer123!" }),
+      });
+      if (loginRes.ok) {
+        const authData = await loginRes.json();
+        if (authData.access_token) {
+          localStorage.setItem("token", authData.access_token);
+          localStorage.setItem("auth_token", authData.access_token);
+          return authData.access_token;
+        }
+      }
+    } catch (e) {
+      // fallback
+    }
+    return "";
+  },
+
   getDashboardSummary: async (startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
     if (startDate) params.set("start_date", startDate);
     if (endDate) params.set("end_date", endDate);
     const qs = params.toString() ? `?${params.toString()}` : "";
+    
+    const fetchSummary = async (authToken?: string) => {
+      const headers: Record<string, string> = {};
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+      return await fetch(`${API_BASE}/dashboard/summary${qs}`, { headers });
+    };
+
     let token = localStorage.getItem("token") || localStorage.getItem("auth_token");
     if (!token) {
-      try {
-        const loginRes = await fetch(`${API_BASE}/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: "engineer@precisionaero.com", password: "Engineer123!" }),
-        });
-        if (loginRes.ok) {
-          const authData = await loginRes.json();
-          token = authData.access_token;
-          if (token) localStorage.setItem("token", token);
-        }
-      } catch (e) {
-        // fallback
-      }
+      token = await api.ensureAuthToken();
     }
-    const headers: Record<string, string> = {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE}/dashboard/summary${qs}`, { headers });
+
+    let res = await fetchSummary(token || undefined);
+    if (res.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("auth_token");
+      token = await api.ensureAuthToken();
+      res = await fetchSummary(token || undefined);
+    }
     return res.json();
   },
 
