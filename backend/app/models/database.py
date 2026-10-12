@@ -73,7 +73,7 @@ class DBMeasurement(Base):
 class DBVisualInspection(Base):
     __tablename__ = "visual_inspections"
     image_id = Column(String, primary_key=True)
-    batch_id = Column(String, ForeignKey("batches.batch_id"))
+    batch_id = Column(String, nullable=True)
     image_url = Column(String, nullable=False)
     annotated_image_url = Column(String, nullable=True)
     defect_detected = Column(Boolean, default=False)
@@ -86,7 +86,7 @@ class DBVisualInspection(Base):
 class DBTelemetry(Base):
     __tablename__ = "telemetry"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    batch_id = Column(String, ForeignKey("batches.batch_id"))
+    batch_id = Column(String, nullable=True)
     timestamp = Column(String, nullable=False)
     spindle_speed_rpm = Column(Float, default=1200.0)
     feed_rate_mmrev = Column(Float, default=0.20)
@@ -102,7 +102,7 @@ class DBTelemetry(Base):
 class DBQualityIncident(Base):
     __tablename__ = "incidents"
     incident_id = Column(String, primary_key=True)
-    batch_id = Column(String, ForeignKey("batches.batch_id"))
+    batch_id = Column(String, nullable=True)
     title = Column(String, nullable=False)
     defect_type = Column(String, nullable=False)
     severity = Column(String, default="High")
@@ -142,7 +142,9 @@ class DBAgentAuditLog(Base):
     created_at = Column(String, default=lambda: datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    from backend.app.database.session import Base as RealBase, engine as RealEngine
+    import backend.app.database.models
+    RealBase.metadata.create_all(bind=RealEngine)
 
 def get_db():
     db = SessionLocal()

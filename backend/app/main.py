@@ -20,7 +20,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from backend.app.routers.api_router import router as api_router
 from backend.app.routers.knowledge_router import router as knowledge_router
-from backend.app.models.database import init_db
+from backend.app.database.session import Base, engine
+import backend.app.database.models
 
 tags_metadata = [
     {"name": "Auth", "description": "Authentication, persona tokens, and RBAC profile"},
@@ -97,7 +98,7 @@ app.add_middleware(
 # Initialize Database and Sample Assets on Startup
 @app.on_event("startup")
 def startup_event():
-    init_db()
+    Base.metadata.create_all(bind=engine)
 
 # Static files mount for uploaded/annotated inspection images
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
