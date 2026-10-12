@@ -22,7 +22,7 @@ services:
           name: qualitymind-postgres
           property: connectionString
       - key: CORS_ORIGINS
-        value: "https://qualitymind.vercel.app,http://localhost:5173,http://localhost:3000"
+        value: "https://qualitymind.vercel.app,https://quality-mind.vercel.app,http://localhost:5173,http://localhost:3000"
 
 databases:
   - name: qualitymind-postgres
