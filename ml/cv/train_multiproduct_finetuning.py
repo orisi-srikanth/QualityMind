@@ -187,9 +187,10 @@ class MultiProductModel(nn.Module):
     1. Product Recognition Head: classifies visual product domain (screw, nut, etc.)
     2. Category Defect Heads: specialized classifier for each product
     """
-    def __init__(self):
+    def __init__(self, pretrained: bool = False):
         super().__init__()
-        base = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
+        weights = models.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        base = models.mobilenet_v3_small(weights=weights)
         self.features = base.features
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         in_features = 576
@@ -264,7 +265,7 @@ def train_fine_tuned_model():
     print(f"Dataset Split -> Train: {len(train_recs)} | Val: {len(val_recs)} | Test: {len(test_recs)}")
 
     device = torch.device("cpu")
-    model = MultiProductModel().to(device)
+    model = MultiProductModel(pretrained=True).to(device)
     model.eval()
 
     eval_transform = transforms.Compose([

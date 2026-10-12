@@ -88,9 +88,10 @@ class ShaftClassificationDataset(Dataset):
 
 class DefectClassifier(nn.Module):
     """MobileNetV3-Small backbone with fine-tuned defect classification head."""
-    def __init__(self, num_classes: int = len(SHAFT_CLASSES)):
+    def __init__(self, num_classes: int = len(SHAFT_CLASSES), pretrained: bool = False):
         super().__init__()
-        base = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
+        weights = models.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        base = models.mobilenet_v3_small(weights=weights)
         self.features = base.features
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         in_features = base.classifier[0].in_features  # 576
@@ -186,7 +187,7 @@ def train_classifier(
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     device = torch.device("cpu")
-    model = DefectClassifier(num_classes=len(SHAFT_CLASSES)).to(device)
+    model = DefectClassifier(num_classes=len(SHAFT_CLASSES), pretrained=True).to(device)
 
     class_weights = compute_class_weights(train_records, len(SHAFT_CLASSES)).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
