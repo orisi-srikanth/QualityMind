@@ -11,10 +11,6 @@ import json
 import hashlib
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Tuple
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-from chromadb.utils import embedding_functions
-import pymupdf
 
 from backend.app.core.config import settings
 from backend.app.core.llm import universal_llm
@@ -52,20 +48,60 @@ class QualityKnowledgeAgent:
         os.makedirs(self.persist_directory, exist_ok=True)
         os.makedirs(self.docs_directory, exist_ok=True)
 
-        # Initialize ChromaDB persistent client and local embedding function
-        self.embedding_function = embedding_functions.DefaultEmbeddingFunction()
-        self.client = chromadb.PersistentClient(
-            path=self.persist_directory,
-            settings=ChromaSettings(anonymized_telemetry=False)
-        )
-        
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            embedding_function=self.embedding_function,
-            metadata={"hnsw:space": "cosine"}
-        )
-
+        self._client = None
+        self._collection = None
+        self._embedding_function = None
+        self._initialized = False
         self.last_ingestion_info: Optional[Dict[str, Any]] = None
+
+    def _ensure_client(self):
+        if self._initialized and self._collection is not None:
+            return
+        try:
+            import chromadb
+            from chromadb.config import Settings as ChromaSettings
+            from chromadb.utils import embedding_functions
+
+            self._embedding_function = embedding_functions.DefaultEmbeddingFunction()
+            self._client = chromadb.PersistentClient(
+                path=self.persist_directory,
+                settings=ChromaSettings(anonymized_telemetry=False)
+            )
+            self._collection = self._client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=self._embedding_function,
+                metadata={"hnsw:space": "cosine"}
+            )
+            self._initialized = True
+        except Exception as e:
+            print(f"[QualityKnowledgeAgent] Warning: ChromaDB initialization deferred or failed: {e}")
+
+    @property
+    def client(self):
+        self._ensure_client()
+        return self._client
+
+    @client.setter
+    def client(self, val):
+        self._client = val
+
+    @property
+    def collection(self):
+        self._ensure_client()
+        return self._collection
+
+    @collection.setter
+    def collection(self, val):
+        self._collection = val
+
+    @property
+    def embedding_function(self):
+        self._ensure_client()
+        return self._embedding_function
+
+    @embedding_function.setter
+    def embedding_function(self, val):
+        self._embedding_function = val
 
     def get_status(self) -> Dict[str, Any]:
         """Returns operational information about the ChromaDB knowledge collection and LLM state."""

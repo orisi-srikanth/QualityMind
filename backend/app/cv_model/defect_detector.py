@@ -32,9 +32,6 @@ from typing import Dict, Any, Optional, Tuple, List
 
 import cv2
 import numpy as np
-import torch
-import torch.nn.functional as F
-import torchvision.transforms as transforms
 from PIL import Image
 
 try:
@@ -43,15 +40,17 @@ try:
 except ImportError:
     HAS_ONNX = False
 
-from ml.cv.train_classifier import (
-    DefectClassifier,
-    GradCAM,
-    SHAFT_CLASSES,
-    CLASS_TO_IDX,
-    IDX_TO_CLASS
-)
-
-# Aliases for compatibility
+# Shaft Defect Classes
+SHAFT_CLASSES = [
+    "no_defect",
+    "surface_scratch",
+    "dent",
+    "crack",
+    "missing_feature",
+    "incorrect_assembly"
+]
+CLASS_TO_IDX = {cls_name: i for i, cls_name in enumerate(SHAFT_CLASSES)}
+IDX_TO_CLASS = {i: cls_name for i, cls_name in enumerate(SHAFT_CLASSES)}
 UNIFIED_CLASSES = SHAFT_CLASSES
 
 PROXY_CATEGORIES = ["metal_nut", "screw", "transistor", "cable"]
@@ -74,7 +73,8 @@ class MultiProductGradCAM:
     def _backward_hook(self, module, gin, gout):
         self.gradients = gout[0]
 
-    def generate(self, input_tensor: torch.Tensor, category: str, class_idx: int) -> np.ndarray:
+    def generate(self, input_tensor: Any, category: str, class_idx: int) -> np.ndarray:
+        import torch
         self.model.eval()
         self.model.zero_grad()
         prod_logits, def_logits, _ = self.model(input_tensor, category=category)
@@ -95,7 +95,7 @@ class MultiProductGradCAM:
 class TwoStageDefectInspector:
     def __init__(self, models_dir: Optional[str] = None):
         self.models_dir = Path(models_dir) if models_dir else Path(__file__).resolve().parent.parent.parent / "models"
-        self.device = torch.device("cpu")
+        self.device = None
         self.confidence_threshold = 0.70
         self.model_version = "synthetic-shaft-v1.0"
 
@@ -107,16 +107,28 @@ class TwoStageDefectInspector:
         self.multiproduct_model = None
         self.multiproduct_gradcam = None
         self.multiproduct_classes = {}
+        self.clf_transform = None
+        self.samples_manifest = {}
+        self._initialized = False
 
-        self._initialize_models()
-
+    def _ensure_initialized(self):
+        if self._initialized:
+            return
+        import torch
+        import torchvision.transforms as transforms
+        self.device = torch.device("cpu")
         self.clf_transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
+        self._initialize_models()
+        self._initialized = True
 
     def _initialize_models(self):
+        import torch
+        from ml.cv.train_classifier import DefectClassifier, GradCAM
+
         # 0. Load Fine-Tuned Multi-Product Model
         mp_path = self.models_dir / "multiproduct_cv_model.pt"
         if not mp_path.exists():
@@ -200,7 +212,7 @@ class TwoStageDefectInspector:
             except Exception as e:
                 print(f"[DefectInspector] Error loading manifest: {e}")
 
-    def infer_category(self, image_path: str, tensor_in: Optional[torch.Tensor] = None) -> str:
+    def infer_category(self, image_path: str, tensor_in: Optional[Any] = None) -> str:
         """Determines product category visually from image pixels or path heuristics."""
         path_lower = image_path.lower()
         if "gear" in path_lower or ("assembly" in path_lower and "shaft" not in path_lower):
@@ -209,6 +221,8 @@ class TwoStageDefectInspector:
         # 1. Visual classification via fine-tuned model
         if tensor_in is not None and self.multiproduct_model is not None:
             try:
+                import torch
+                import torch.nn.functional as F
                 with torch.no_grad():
                     feat = self.multiproduct_model.extract_embedding(tensor_in)
                     prod_logits = self.multiproduct_model.product_head(feat)
@@ -247,6 +261,10 @@ class TwoStageDefectInspector:
         - Bounding box extraction with Grad-CAM and MVTec ground-truth alignment.
         - Conforms strictly to required JSON schema.
         """
+        self._ensure_initialized()
+        import torch
+        import torch.nn.functional as F
+
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Image not found at {image_path}")
 
