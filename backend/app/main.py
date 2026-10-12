@@ -17,7 +17,7 @@ for _d in [_repo_dir, _backend_dir]:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from backend.app.routers.api_router import router as api_router
 from backend.app.routers.knowledge_router import router as knowledge_router
 from backend.app.database.session import Base, engine
@@ -133,6 +133,10 @@ if os.path.exists(dist_dir):
         if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
         return FileResponse(os.path.join(dist_dir, "index.html"))
+else:
+    @app.get("/", include_in_schema=False)
+    def root_redirect():
+        return RedirectResponse(url="/docs")
 
 if __name__ == "__main__":
     import uvicorn
